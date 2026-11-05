@@ -449,7 +449,7 @@ body{{background:var(--bg);color:var(--fg);font:16px/1.5 Geist,-apple-system,san
 body:before{{content:"";position:fixed;inset:-20%;z-index:-2;filter:blur(30px)}}
 .app{{height:100dvh;display:grid;grid-template-rows:auto 1fr auto;grid-template-columns:minmax(0,1fr);width:100%}}
 /* motionsites-style pill bar: brand left, filter chips, live pill */
-header{{display:flex;align-items:center;gap:14px;padding:14px 20px 8px;max-width:1240px;width:100%;margin:0 auto}}
+header{{display:flex;align-items:center;gap:14px;padding:14px 20px 8px;max-width:1400px;width:100%;margin:0 auto}}
 .brand{{font:700 18px Fredoka,sans-serif;display:flex;align-items:center;gap:8px;white-space:nowrap}}
 .brand i{{width:10px;height:10px;border-radius:50%;background:var(--tone)}}
 .tabs{{min-width:0;position:relative;display:flex;gap:4px;padding:5px;border-radius:999px;border:2px solid var(--line);background:color-mix(in srgb,var(--bg) 70%,transparent);backdrop-filter:blur(14px);margin:0 auto;overflow-x:auto;scrollbar-width:none}}
@@ -459,6 +459,10 @@ header{{display:flex;align-items:center;gap:14px;padding:14px 20px 8px;max-width
 .tabs .ink{{position:absolute;z-index:0;top:5px;bottom:5px;border-radius:999px;background:var(--fg);transition:left .5s cubic-bezier(.3,1.3,.5,1),width .5s cubic-bezier(.3,1.3,.5,1)}}
 .tabs .rider{{position:absolute;z-index:2;top:-20px;width:20px;transition:left .5s cubic-bezier(.3,1.3,.5,1)}}
 .live{{padding:6px 12px;border-radius:999px;background:var(--fg);color:var(--bg);font:600 13px 'Geist Mono',monospace;white-space:nowrap}}
+/* When the seven tabs do not fit, the header tightens in steps (set by fitTabs below) rather than cutting a tab off. */
+header.t1{{gap:10px}} header.t1 .tabs button{{padding:7px 10px;font-size:13.5px}}
+header.t2 .brand{{font-size:0;gap:0}} header.t2 .live .lx{{display:none}}
+header.t3 .tabs button{{padding:6px 8px;font-size:12.5px}} header.t4 .live{{display:none}}
 .stage{{position:relative;overflow:hidden}} .inner>:first-child{{margin-top:auto}} .inner>:last-child{{margin-bottom:auto}}
 .panel{{position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;padding:var(--top,80px) 20px var(--bot,64px);opacity:0;visibility:hidden;transform:translateY(56px) scale(.985);filter:blur(4px);
  transition:opacity .7s cubic-bezier(.22,1,.36,1),transform .9s cubic-bezier(.22,1,.36,1),filter .7s,visibility 0s .9s}}
@@ -598,7 +602,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <pattern id=hatch width=10 height=10 patternUnits=userSpaceOnUse patternTransform="rotate(45)"><rect width=10 height=10 fill="var(--hot)" opacity=".16"/><line x1=0 y1=0 x2=0 y2=10 stroke="var(--hot)" stroke-width=3 opacity=".5"/></pattern>
 </defs></svg>
 <div class=app>
-<header><div class=brand><i></i>{"Too small a Mac" if rec > TOTAL else "Mac memory check"}</div><nav class=tabs role=tablist aria-label="Sections">{tab_html}<span class=ink></span><svg class=rider viewBox="0 0 60 92" aria-hidden=true>{mini(30, 90, 90)}</svg></nav><span class=live>{out_mb:.0f} MB/min to disk</span></header>
+<header><div class=brand><i></i>{"Too small a Mac" if rec > TOTAL else "Mac memory check"}</div><nav class=tabs role=tablist aria-label="Sections">{tab_html}<span class=ink></span><svg class=rider viewBox="0 0 60 92" aria-hidden=true>{mini(30, 90, 90)}</svg></nav><span class=live title="Memory written out to the disk in the last minute">{out_mb:.0f} MB/min<span class=lx> to disk</span></span></header>
 <div class=stage>
 
 <section class=panel id=p-rec role=tabpanel><div class=inner>
@@ -760,8 +764,14 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
   document.querySelectorAll(".jobs").forEach(box => {{ try {{ const jv = localStorage.getItem("mm-win-" + box.closest(".panel").id);
     const jb = jv && box.querySelector('.jt[data-v="' + jv + '"]'); if (jb) jb.click(); }} catch (_) {{}} }});
   let start = location.hash.slice(1); try {{ start = start || localStorage.getItem("mm-tab"); }} catch (_) {{}}
+  // Tighten the header one step at a time until every tab fits (t1: smaller tabs, t2: title and "to disk" go, t3: smaller again, t4: the disk chip goes).
+  const hdr = document.querySelector("header"), bar = document.querySelector(".tabs");
+  const fitTabs = () => {{ hdr.classList.remove("t1", "t2", "t3", "t4");
+    for (const c of ["t1", "t2", "t3", "t4"]) {{ if (bar.scrollWidth <= bar.clientWidth + 1) break; hdr.classList.add(c); }} }};
+  fitTabs();
   show(Math.max(0, ids.indexOf(start)), false);
-  addEventListener("resize", () => {{ const c = cur; cur = -1; show(c, false); }});
+  const refit = () => {{ fitTabs(); const c = cur; cur = -1; show(c, false); }};
+  addEventListener("resize", refit); if (document.fonts) document.fonts.ready.then(refit);
 
   // Busy-day chart: a buddy walks along the red line; hovering moves it to the minute under the pointer.
   const D = {series}, n = D.t.length, W = {W}, H = {H}, PAD = {PAD}, top = {top:.3f};
