@@ -11,7 +11,7 @@ measurements: does this Mac have enough memory for the owner's real workload, an
 
 Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the page, settings).
 
-## What the page shows (seven screens, answer first; scroll or swipe between them)
+## What the page shows (eight screens, answer first; scroll or swipe between them)
 
 1. **Recommendation**: the RAM and storage to buy. RAM = highest memory need ever recorded × 1.25, rounded up
    to a size Macs are sold in (16/24/32/36/48/64/96/128 GB); a budget pick = smallest size that covered 99%
@@ -23,15 +23,19 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
    on the summary; pause, step and replay buttons; a click or scroll anywhere puts the page back).
 2. **Today**: today's minute-by-minute memory need against the RAM line, the minutes it was actively
    swapping, and what held memory at today's busiest minute.
-3. **Busy days**: one timeline since the history start: Claude Code sessions open at once above the line
+3. **Hot & slow**: everything that makes the Mac hot, loud or slow, minute by minute today: chip
+   temperature, fan speed, processors, graphics, disk traffic and memory pushed to disk, each with a
+   dotted "too much" line and red above it; tiles for right now, and which apps kept the processors busy
+   while it ran hot. Temperature and fan come from `heat`, a small Swift program install.sh builds.
+4. **Busy days**: one timeline since the history start: Claude Code sessions open at once above the line
    (from `~/.claude/projects` transcripts), memory over the RAM size below it, per measured day.
-4. **Busy hours**: weekday by working-hour heatmap of the highest memory needed.
-5. **What uses memory**: a walking buddy per app and per Claude session, plus every app group's memory
+5. **Busy hours**: weekday by working-hour heatmap of the highest memory needed.
+6. **What uses memory**: a walking buddy per app and per Claude session, plus every app group's memory
    now / 24 h / 7 days / 30 days (average and busiest minute); Claude's tools and test browsers expand into
    groups and scripts.
-6. **What Claude runs**: Claude's tools and hidden test browsers by kind (test browsers, page checks, cloud tools,
+7. **What Claude runs**: Claude's tools and hidden test browsers by kind (test browsers, page checks, cloud tools,
    plug-ins, build scripts, shell), now / 24 h / 7 days / 30 days, each opening into its scripts and session.
-7. **How this works**: what is measured, how the recommendation is worked out, and the caveats.
+8. **How this works**: what is measured, how the recommendation is worked out, and the caveats.
 
 ## Install
 
@@ -77,7 +81,8 @@ as days accumulate.
 ## Files
 
 - `app/memlog.py`: takes a reading, appends to `~/memlog/{mem,apps,live,tools,cpu}.csv`, rebuilds the page.
-- `app/report.py`: the page (seven screens, charts, recommendation).
+- `app/report.py`: the page (eight screens, charts, recommendation).
+- `app/hotpanel.py`: the Hot & slow screen. `app/heat.swift`: chip temperature, fan speed and macOS's heat level, built into `~/memlog/heat` at install.
 - `app/buddy.py`: the mascot, the buddy yard and the sparkle effects.
 - `app/backfill_sessions.py`: rebuilds session history from `~/.claude/projects/*/*.jsonl` (hourly).
 - `app/icon/`: Dock icon, tab icon.

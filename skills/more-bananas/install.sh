@@ -15,8 +15,15 @@ while [ $# -gt 0 ]; do case "$1" in
   *) echo "unknown option $1"; exit 1;; esac; shift; done
 
 mkdir -p "$DATA/icon" "$HOME/Library/LaunchAgents"
-cp "$SRC"/memlog.py "$SRC"/report.py "$SRC"/buddy.py "$SRC"/backfill_sessions.py "$DATA/"
+cp "$SRC"/memlog.py "$SRC"/report.py "$SRC"/hotpanel.py "$SRC"/buddy.py "$SRC"/backfill_sessions.py "$DATA/"
 cp "$SRC"/icon/* "$DATA/icon/"
+# The heat reader (chip temperature, fan speed, macOS heat level) is a tiny Swift program. Without swiftc the page
+# still works, it just has no temperature or fan readings.
+if command -v swiftc >/dev/null 2>&1 && swiftc -O "$SRC/heat.swift" -o "$DATA/heat.new" 2>/dev/null; then
+  mv "$DATA/heat.new" "$DATA/heat"
+else
+  rm -f "$DATA/heat.new"; echo "Note: swiftc not found, so temperature and fan readings are skipped (xcode-select --install adds it)."
+fi
 # Settings: keep existing ones, apply any flags given now.
 "$PY" - "$DATA/config.json" "$DRIVE" "$HIST" <<'PYEOF'
 import json, os, sys

@@ -197,7 +197,50 @@ out_mb, in_mb = rate("Swapouts"), rate("Swapins")
 comp_gb = cnt["Pages occupied by compressor"] * page / 2**30
 squeezed_gb = cnt["Pages stored in compressor"] * page / 2**30
 wired_gb = cnt["Pages wired down"] * page / 2**30
-json.dump({"t": time.time(), "Swapouts": cnt["Swapouts"], "Swapins": cnt["Swapins"]}, open(state_p, "w"))
+# ---------- heat, and the other things that make a Mac hot, loud or slow (all readable without admin rights) ----------
+HEAT = os.path.join(HOME, "heat.csv")        # time, thermal state, fan rpm, fan max rpm, hottest chip sensor C, graphics % busy
+IO = os.path.join(HOME, "io.csv")            # time, disk read, disk write, network in, network out (MB per minute)
+APPCPU = os.path.join(HOME, "cpu_apps.csv")  # time, app group, % of all cores it kept busy
+
+
+def try_sh(*a):  # like sh(), but a missing tool or a slow answer gives "" instead of stopping the reading
+    try:
+        return subprocess.run(a, capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return ""
+
+
+heat_state, fan_rpm, fan_max, chip_c = "", -1, -1, -1.0
+heat_bin = os.path.join(HOME, "heat")        # built from heat.swift by install.sh; absent if swiftc was not available
+if os.access(heat_bin, os.X_OK):
+    hp_ = try_sh(heat_bin).strip().split(",")
+    if len(hp_) == 4:
+        heat_state, fan_rpm, fan_max, chip_c = hp_[0], int(hp_[1]), int(hp_[2]), float(hp_[3])
+gm_ = re.search(r'"Device Utilization %"=(\d+)', try_sh("ioreg", "-r", "-d", "1", "-c", "IOAccelerator"))
+gpu_pct = float(gm_.group(1)) if gm_ else -1.0
+st_ = try_sh("ioreg", "-c", "IOBlockStorageDriver", "-r", "-k", "Statistics", "-d", "1")
+io_now = {"disk_r": sum(int(x) for x in re.findall(r'"Bytes \(Read\)"=(\d+)', st_)),
+          "disk_w": sum(int(x) for x in re.findall(r'"Bytes \(Write\)"=(\d+)', st_)), "net_i": 0, "net_o": 0}
+for l_ in try_sh("netstat", "-ib").splitlines()[1:]:   # one <Link> row per interface; byte columns counted from the end
+    f_ = l_.split()
+    if len(f_) >= 10 and f_[2].startswith("<Link") and not f_[0].startswith("lo"):
+        io_now["net_i"] += int(f_[-5]); io_now["net_o"] += int(f_[-2])
+
+
+def brate(k):  # MB per minute from a byte counter; 0 on the first run or after a restart resets it
+    return max(io_now[k] - prev[k], 0) / 2**20 / mins if prev and k in prev and io_now[k] >= prev[k] else 0.0
+
+
+io_rates = [brate(k) for k in ("disk_r", "disk_w", "net_i", "net_o")]
+with open(HEAT, "a") as f:
+    f.write(f"{stamp},{heat_state},{fan_rpm},{fan_max},{chip_c:.1f},{gpu_pct:.0f}\n")
+with open(IO, "a") as f:
+    f.write(stamp + "," + ",".join(f"{x:.1f}" for x in io_rates) + "\n")
+with open(APPCPU, "a") as f:
+    for g_, x_ in sorted(cpu_by_group.items(), key=lambda kv: -kv[1]):
+        if x_ >= 0.5:
+            f.write(f"{stamp},{g_},{x_:.1f}\n")
+json.dump({"t": time.time(), "Swapouts": cnt["Swapouts"], "Swapins": cnt["Swapins"], **io_now}, open(state_p, "w"))
 with open(LIVE, "a") as f:
     f.write(f"{stamp},{out_mb:.1f},{in_mb:.1f},{comp_gb:.2f},{wired_gb:.2f},{squeezed_gb:.2f}\n")
 
@@ -274,6 +317,6 @@ if cfg.get("drive_backup"):
     if drives and (int(time.strftime("%M")) % 15 == 0 or not os.path.isdir(os.path.join(drives[0], "Memory Monitor"))):
         dest = os.path.join(drives[0], "Memory Monitor")
         os.makedirs(dest, exist_ok=True)
-        for name in ("mem.csv", "apps.csv", "live.csv", "cpu.csv", "tools.csv", "history_sessions.csv", "memory-report.html", "config.json"):
+        for name in ("mem.csv", "apps.csv", "live.csv", "cpu.csv", "cpu_apps.csv", "heat.csv", "io.csv", "tools.csv", "history_sessions.csv", "memory-report.html", "config.json"):
             if os.path.exists(os.path.join(HOME, name)):
                 shutil.copy2(os.path.join(HOME, name), dest)

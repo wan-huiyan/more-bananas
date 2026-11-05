@@ -17,7 +17,7 @@
 
 <p align="center">
   <img src="docs/demo/tour.gif" width="860" alt="Four tabs of the page: the recommendation, today's memory chart, what uses memory, and what Claude runs over the last 24 hours"/>
-  <br/><sub>Four of the seven tabs: the recommendation, today minute by minute, what uses memory, and what Claude ran in the last 24 hours. The first tab is the answer: on this 16 GB work laptop, 16 GB was enough in only 35% of working minutes, 32 GB would have covered 99%, and 48 GB covers the busiest minute (33.9 GB) with a quarter to spare. Real readings, project names replaced.</sub>
+  <br/><sub>Four of the tabs: the recommendation, today minute by minute, what uses memory, and what Claude ran in the last 24 hours. The first tab is the answer: on this 16 GB work laptop, 16 GB was enough in only 35% of working minutes, 32 GB would have covered 99%, and 48 GB covers the busiest minute (33.9 GB) with a quarter to spare. Real readings, project names replaced.</sub>
 </p>
 
 ## Why it exists
@@ -33,10 +33,11 @@ This measures instead. It reads macOS's own memory figures once a minute, keeps 
 | 🎯 | **A measured recommendation, explained** | Busiest minute ever recorded × 1.25, rounded up to a size Macs are sold in, and the buddy walks you through how it got there, step by step. Plus a budget pick (smallest size that covered 99% of working minutes) and storage (current use × 1.5). Updates itself every minute. |
 | 📊 | **"Would it have fitted?" ladder** | For 16 / 24 / 32 / 36 / 48 / 64 GB: the share of your working minutes (7am to midnight) each size would have handled, with and without Claude's hidden test browsers. |
 | 📈 | **Today, minute by minute** | Memory needed against your RAM line, the striped overflow onto disk, and the minutes the Mac was actively moving memory to disk. Hover any minute. |
+| 🔥 | **Hot & slow** | Chip temperature, fan speed, processors, graphics, disk traffic and memory pushed to disk, minute by minute, each with a "too much" line (90 °C, fan at 60%, 85% busy…). Plus which apps kept the processors busy while it ran hot. No admin rights needed. |
 | 📅 | **Busy days and busy hours** | One timeline since the history start: Claude Code sessions open at once above the line, memory over your RAM below it. Plus a weekday × hour heatmap. |
 | 🧸 | **Who is using it** | One walking banana buddy per app and per Claude Code session, sized by memory. Every app's memory now / 24 h / 7 days / 30 days. |
 | 🤖 | **What Claude runs** | Claude's tools grouped into plain kinds (test browsers, page checks, cloud tools, plug-ins, build scripts, shell), each opening into its scripts and the session folder that started them. |
-| 🪶 | **Light** | One run takes about 0.35 s a minute and stores about 1 MB of readings a day. Nothing is sent anywhere. |
+| 🪶 | **Light** | One run takes about 0.6 s a minute and stores about 2 MB of readings a day. Nothing is sent anywhere. |
 | 🛟 | **Survives a dead laptop** | Optional copy of readings and page to Google Drive every 15 minutes. |
 
 ## See it in action
@@ -76,7 +77,7 @@ This measures instead. It reads macOS's own memory figures once a minute, keeps 
 | <img src="docs/screens/rec.png" width="420"/><br/>**🎯 Recommendation.** The RAM and storage to buy, how often each size would have been enough, and the buddy's step-by-step reasoning. | <img src="docs/screens/today.png" width="420"/><br/>**📈 Today.** Today minute by minute against your RAM line, and which apps held the busiest minute. |
 | <img src="docs/screens/days.png" width="420"/><br/>**📅 Busy days.** Claude Code sessions open at once (top) and memory over your RAM (bottom), day by day on one timeline. | <img src="docs/screens/hours.png" width="420"/><br/>**🕐 Busy hours.** Weekday × hour heatmap, 7am to midnight: which hours run out. Here, 13 of the 19 hours seen. |
 | <img src="docs/screens/uses.png" width="420"/><br/>**🧸 What uses memory.** The buddy yard, plus every app's memory now, over 24 hours, 7 days and 30 days. | <img src="docs/screens/claude.png" width="420"/><br/>**🤖 What Claude runs.** Claude's tools in plain groups: test browsers, page checks, cloud tools, plug-ins, build scripts, shell. |
-| <img src="docs/screens/how.png" width="420"/><br/>**🔍 How this works.** What each number means, where it comes from, and what it can't tell you. | |
+| <img src="docs/screens/how.png" width="420"/><br/>**🔍 How this works.** What each number means, where it comes from, and what it can't tell you. | **🔥 Hot & slow.** Why it's hot, loud or slow right now: chip temperature, fan, processors, graphics, disk and memory, minute by minute, with the apps behind it. *(Screenshot to follow once it has a full day of readings.)* |
 
 ## Quick start
 
@@ -125,7 +126,7 @@ Re-running `install.sh` upgrades the code and keeps your readings and settings. 
 |---|---|
 | 🧸 **Dock buddy** (with `--dock`) | `~/Applications/Memory Monitor.app`, pinned to your Dock. Your Dock layout is saved to `~/memlog/dock-backup.plist` first. |
 | 📄 **The page** | `~/memlog/memory-report.html`, with a shortcut on your Desktop: `~/Desktop/memory-report.html`. Opens in any browser, works offline, and the tab shows the buddy too. |
-| 📊 **Your readings** | `~/memlog/*.csv`: memory, apps, swapping, Claude's tools, processor. Plain CSV, yours to keep. |
+| 📊 **Your readings** | `~/memlog/*.csv`: memory, apps, swapping, Claude's tools, processor (overall and per app), heat and fan, disk and network traffic. Plain CSV, yours to keep. |
 | ⚙️ **Settings** | `~/memlog/config.json` |
 | ⏱️ **The background job** | `~/Library/LaunchAgents/com.memlog.monitor.plist`, run by macOS every 60 seconds, including after a restart. Errors go to `~/memlog/error.log`. |
 | ☁️ **Backup** (with `--drive-backup`) | `My Drive/Memory Monitor/` in Google Drive, every 15 minutes |
@@ -144,8 +145,9 @@ Re-running `install.sh` upgrades the code and keeps your readings and settings. 
 - **It leans high.** "Memory needed" is RAM in use plus swap, and swap can hold stale data from hours earlier. The minutes the Mac was *actively* writing to disk are shown separately as the fairer slowdown signal.
 - **Per-app figures are approximate.** They count memory still in RAM (not on disk), memory two apps share can be counted twice, and Meet or Zoom in a browser count as the browser.
 - **History before install is partial.** Days before the monitor started come from Claude Code transcripts only; Codex and sessions idle for 30+ minutes are not counted.
-- **Processor load is recorded but light-touch:** share of all cores busy per minute. It tells you whether memory or the chip is the limit, not which chip to buy.
-- **macOS only.** It reads `vm_stat`, `sysctl` and `ps`, and runs under launchd.
+- **Processor load is recorded but light-touch:** share of all cores busy per minute, and each app's share. It tells you whether memory or the chip is the limit, not which chip to buy.
+- **The heat lines are rules of thumb.** 90 °C, a fan at 60% and 85% busy are where a Mac usually feels hot, loud or slow, not limits macOS enforces. Temperature and fan need the Xcode command line tools (for `swiftc`) at install; without them those two strips stay empty. Fan speed reads blank on a Mac with no fan.
+- **macOS only.** It reads `vm_stat`, `sysctl`, `ps`, `ioreg` and `netstat`, plus a small Swift helper for temperature and fan, and runs under launchd.
 
 ## How it works
 
@@ -159,6 +161,8 @@ skills/more-bananas/
 └── app/
     ├── memlog.py       takes a reading, writes the CSVs, rebuilds the page
     ├── report.py       the page: tabs, charts, recommendation
+    ├── hotpanel.py     the Hot & slow tab
+    ├── heat.swift      reads chip temperature, fan speed and macOS's heat level (built at install)
     ├── buddy.py        the mascot, the buddy yard, the sparkles
     └── backfill_sessions.py   session history from ~/.claude/projects transcripts
 ```

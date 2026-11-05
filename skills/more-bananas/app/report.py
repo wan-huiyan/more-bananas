@@ -9,6 +9,8 @@ import html
 import json
 import os
 
+from hotpanel import add_heat, heat_section
+
 
 def gb(x):
     return f"{x:.1f}"
@@ -439,10 +441,11 @@ def render(v):
     d7_cut = (dt.datetime.strptime(a_last, "%Y-%m-%d %H:%M") - dt.timedelta(days=7)).strftime("%Y-%m-%d %H:%M") if a_last else ""
     br_peak = max((d_.get(BR, 0) for t, d_ in apps_all.items() if t > d7_cut), default=0)
 
-    tabs = [("rec", "Recommendation"), ("today", "Today"), ("days", "Busy days"), ("hours", "Busy hours"), ("uses", "What uses memory"), ("claude", "What Claude runs"), ("how", "How this works")]
+    heat_sec = heat_section(v["HOME"], T[-1][:10])   # the Hot & slow tab; empty (and no tab) before any reading
+    tabs = [("rec", "Recommendation"), ("today", "Today")] + ([("heat", "Hot & slow")] if heat_sec else []) + [("days", "Busy days"), ("hours", "Busy hours"), ("uses", "What uses memory"), ("claude", "What Claude runs"), ("how", "How this works")]
     tab_html = "".join(f'<button role=tab data-go="{k}" aria-controls="p-{k}">{t}</button>' for k, t in tabs)
 
-    return add_lesson(f"""<!doctype html><html lang=en><head><meta charset=utf-8><script>try{{if(sessionStorage.getItem("mm-again"))document.documentElement.classList.add("again")}}catch(_){{}}
+    return add_heat(add_lesson(f"""<!doctype html><html lang=en><head><meta charset=utf-8><script>try{{if(sessionStorage.getItem("mm-again"))document.documentElement.classList.add("again")}}catch(_){{}}
 setTimeout(function(){{try{{sessionStorage.setItem("mm-again","1")}}catch(_){{}}location.reload()}},60000)</script>
 <style>html{{background:#fff7d6}}</style>
 <script>addEventListener("load",function(){{if(!document.documentElement.classList.contains("again"))return;
@@ -473,7 +476,7 @@ header{{display:flex;align-items:center;gap:14px;padding:14px 20px 8px;max-width
 /* When the seven tabs do not fit, the header tightens in steps (set by fitTabs below) rather than cutting a tab off. */
 header.t1{{gap:10px}} header.t1 .tabs button{{padding:7px 10px;font-size:13.5px}}
 header.t2 .brand{{font-size:0;gap:0}} header.t2 .live .lx{{display:none}}
-header.t3 .tabs button{{padding:6px 8px;font-size:12.5px}} header.t4 .live{{display:none}}
+header.t3 .tabs button{{padding:6px 8px;font-size:12.5px}} header.t4 .live{{display:none}} header.t5 .tabs{{gap:2px}} header.t5 .tabs button{{padding:6px 6px;font-size:12px}}
 .stage{{position:relative;overflow:hidden}} .inner>:first-child{{margin-top:auto}} .inner>:last-child{{margin-bottom:auto}}
 .panel{{position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;padding:var(--top,80px) 20px var(--bot,64px);opacity:0;visibility:hidden;transform:translateY(56px) scale(.985);filter:blur(4px);
  transition:opacity .7s cubic-bezier(.22,1,.36,1),transform .9s cubic-bezier(.22,1,.36,1),filter .7s,visibility 0s .9s}}
@@ -665,6 +668,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <div class="legend en" style="--n:4"><span><i style="background:var(--hot)"></i>memory needed (in RAM + parked on disk)</span><span><i style="background:var(--ram)"></i>in RAM</span><span><i style="background:repeating-linear-gradient(45deg,var(--hot) 0 2px,transparent 2px 5px)"></i>overflow onto disk</span><span>{swap_mins} minutes swapping, {heavy_mins} of them heavy</span></div>
 </div></section>
 
+{heat_sec}
 <section class=panel id=p-days role=tabpanel><div class=inner>
 <div class=en><p class=kick>Every day since {first.strftime("%-d %B")}</p><h2 class=big>Over {TOTAL:.0f} GB on <em>{over_days} of {len(meas)}</em> measured days</h2></div>
 <p class="lede en" style="--n:1">Above the line: how many Claude Code sessions ran at once, one head each. {busy_days} days reached 10 or more. Below the line: how far that day's busiest minute went past {TOTAL:.0f} GB. Memory has only been measured since {since}.</p>
@@ -708,6 +712,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <li><b>Every minute</b> a background job reads macOS figures (<code>vm_stat</code>, <code>sysctl</code>, <code>ps</code>) into <code>~/memlog/</code>{', copied to Google Drive every 15 minutes' if cfg.get('drive_backup') else ''}: memory in use, memory on disk, memory per app, the scripts Claude runs, and processor load. Nothing is sent anywhere else.</li>
 <li><b>Memory needed</b> is memory in use plus memory parked on disk (swap). Swap can keep old data from hours earlier, so this can overstate the real need; the minutes the Mac was actively moving memory to disk are shown separately as the drops on the Today chart.</li>
 <li><b>The recommendation</b> is the busiest minute ever measured plus a quarter, rounded up to a size Macs come in. The budget pick is the smallest size that would have covered 99% of working minutes. Storage is what is in use now plus half again.</li>
+<li><b>Hot &amp; slow</b> reads, each minute and without admin rights: the hottest processor temperature sensor and the fan speed (from a small Swift program, <code>heat</code>, built at install), macOS&#x27;s graphics load (<code>ioreg</code>), disk bytes read and written (<code>ioreg</code>), network bytes (<code>netstat</code>, recorded in <code>io.csv</code> but not drawn) and each app&#x27;s share of the processors (<code>ps</code>). It also records macOS&#x27;s own heat level; when that goes above normal, macOS is slowing the Mac down to cool it, and the temperature tile says so. The dotted lines (90 &deg;C, fan at 60%, 85% busy, 1 GB a minute of disk, 100 MB a minute pushed to disk) are rules of thumb, not limits macOS enforces.</li>
 <li><b>Per-app memory</b> counts memory still in memory, not on disk. Memory two apps share can be counted twice. Meet is counted inside Chrome.</li>
 <li>{f'<b>Before {e(split_t)}</b> Chrome and the hidden test browsers Claude opens were counted together; those readings say so. ' if any('not split' in g for d_ in apps_all.values() for g in d_) else ''}Claude&#x27;s scripts are tracked from {e(tfirst or "now")}, processor load from {e(cpu_rows[0][0] if cpu_rows else "now")}.</li>
 <li><b>Session history</b> before {since} comes from Claude Code transcripts: a session counts as open while its messages are under 30 minutes apart. Codex and idle open sessions are not counted, so real numbers were probably higher.</li>
@@ -775,10 +780,10 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
   document.querySelectorAll(".jobs").forEach(box => {{ try {{ const jv = localStorage.getItem("mm-win-" + box.closest(".panel").id);
     const jb = jv && box.querySelector('.jt[data-v="' + jv + '"]'); if (jb) jb.click(); }} catch (_) {{}} }});
   let start = location.hash.slice(1); try {{ start = start || localStorage.getItem("mm-tab"); }} catch (_) {{}}
-  // Tighten the header one step at a time until every tab fits (t1: smaller tabs, t2: title and "to disk" go, t3: smaller again, t4: the disk chip goes).
+  // Tighten the header one step at a time until every tab fits (t1: smaller tabs, t2: title and "to disk" go, t3: smaller again, t4: the disk chip goes, t5: tighter still).
   const hdr = document.querySelector("header"), bar = document.querySelector(".tabs");
-  const fitTabs = () => {{ hdr.classList.remove("t1", "t2", "t3", "t4");
-    for (const c of ["t1", "t2", "t3", "t4"]) {{ if (bar.scrollWidth <= bar.clientWidth + 1) break; hdr.classList.add(c); }} }};
+  const fitTabs = () => {{ hdr.classList.remove("t1", "t2", "t3", "t4", "t5");
+    for (const c of ["t1", "t2", "t3", "t4", "t5"]) {{ if (bar.scrollWidth <= bar.clientWidth + 1) break; hdr.classList.add(c); }} }};
   fitTabs();
   show(Math.max(0, ids.indexOf(start)), false);
   const refit = () => {{ fitTabs(); const c = cur; cur = -1; show(c, false); }};
@@ -812,7 +817,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
   if (!still) setInterval(() => {{ if (hover < 0) {{ step = (step + Math.max(1, Math.round(n / 120))) % n; put(step); }} }}, 250);
 }})();
 let seen = false; try {{ seen = sessionStorage.getItem("mm-seen") === "1"; sessionStorage.setItem("mm-seen", "1"); }} catch (_) {{}}
-</script></body></html>""")
+</script></body></html>"""))
 
 
 # ---------- Recommendation: the buddy teaches how it got to the answer ----------
