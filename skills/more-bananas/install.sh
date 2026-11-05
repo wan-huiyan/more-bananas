@@ -40,6 +40,8 @@ cat > "$PLIST" <<PL
 </dict></plist>
 PL
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+# The first reading can finish within the same second, so wait for a fresh page rather than comparing times.
+rm -f "$DATA/memory-report.html"
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 ln -sf "$DATA/memory-report.html" "$HOME/Desktop/memory-report.html"
 
@@ -57,6 +59,6 @@ if [ "$DOCK" = 1 ]; then
 fi
 
 echo "Waiting for the first reading..."
-for i in $(seq 1 30); do [ "$DATA/memory-report.html" -nt "$PLIST" ] && break; sleep 1; done
-if [ "$DATA/memory-report.html" -nt "$PLIST" ]; then echo "Done. Opening ~/Desktop/memory-report.html"; open "$DATA/memory-report.html"
+for i in $(seq 1 30); do [ -s "$DATA/memory-report.html" ] && break; sleep 1; done
+if [ -s "$DATA/memory-report.html" ]; then echo "Done. Opening ~/Desktop/memory-report.html"; open "$DATA/memory-report.html"
 else echo "No page yet. Check $DATA/error.log"; exit 1; fi
