@@ -51,6 +51,7 @@ GROUPS = [  # first match wins; order matters
 ]
 claude = chrome = 0.0
 terms, by_group, sessions = 0, {}, []
+grp = {}  # pid -> app group, reused below to split the processor load by app
 procs = {}
 for line in sh("ps", "-axo", "pid=,ppid=,rss=,command=").splitlines():
     parts = line.strip().split(None, 3)
@@ -70,6 +71,7 @@ for pid, (_ppid, rss, cmd) in procs.items():
     g = next((name for name, test in GROUPS if test(cmd)), "Other apps")
     if g == "Chrome (incl. Meet)" and any(k in chrome_root(pid) for k in AUTOMATION):
         g = "Browsers Claude drives"
+    grp[pid] = g
     by_group[g] = by_group.get(g, 0) + gb
     if g == "Chrome (incl. Meet)":
         chrome += gb
@@ -164,7 +166,13 @@ with open(LOG, "a") as f:
 # Processor load: share of all cores busy right now, and the 1-minute load average.
 CPU = os.path.join(HOME, "cpu.csv")              # time, % of all cores busy, 1-minute load average, cores
 cores = int(sh("sysctl", "-n", "hw.ncpu"))
-cpu_pct = sum(float(x) for x in sh("ps", "-A", "-o", "%cpu=").split()) / cores
+# Each app group's share of all cores, so the page can say which apps are keeping the processors busy right now.
+cpu_by_group = {}
+for line in sh("ps", "-axo", "pid=,%cpu=").splitlines():
+    p_ = line.split()
+    if len(p_) == 2:
+        g_ = grp.get(p_[0], "Other apps"); cpu_by_group[g_] = cpu_by_group.get(g_, 0) + float(p_[1]) / cores
+cpu_pct = sum(cpu_by_group.values())
 load1 = float(sh("sysctl", "-n", "vm.loadavg").split()[1])
 with open(CPU, "a") as f:
     f.write(f"{stamp},{min(cpu_pct, 100):.1f},{load1:.2f},{cores}\n")
@@ -208,6 +216,8 @@ lpk = max(range(len(lv)), key=lambda i: LO[i])
 mood, word, tone = (("calm", "calm", "#34d399") if out_mb < 5 else
                     ("tight", "swapping a little", "#fbbf24") if out_mb < 100 else
                     ("over", "swapping hard", "#fb7185"))
+if mood == "calm" and cpu_pct >= 60:  # memory is calm but the processors are not: amber dot and tab icon, not green
+    tone = "#fbbf24"
 mouth = {"calm": "M12 21 Q16 25 20 21", "tight": "M12 22 L20 22", "over": "M12 23 Q16 19 20 23"}[mood]
 fav = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="2" y="2" width="28" height="28" rx="9" fill="{tone.replace("#", "%23")}"/>'
        f'<circle cx="12" cy="14" r="2" fill="%23fff"/><circle cx="20" cy="14" r="2" fill="%23fff"/>'

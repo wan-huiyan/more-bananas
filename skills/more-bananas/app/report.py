@@ -89,8 +89,19 @@ def render(v):
         d_ = dt.datetime.strptime(t, "%Y-%m-%d %H:%M"); k_ = (d_.weekday(), d_.hour)
         cell[k_] = max(cell.get(k_, 0), x)
     calm = out_mb < 5
-    status_line = ("Right now it is quiet: nothing is being pushed to disk." if calm else
-                   f"Right now it is pushing {out_mb:.0f} MB a minute to disk.")
+    # The line says what the Mac is doing this minute: memory (pushing to disk) AND the processors, because a hot,
+    # loud Mac with nothing going to disk is busy processors, and "quiet" alone would be wrong.
+    cpu_now = v.get("cpu_pct")
+    cpu_top = sorted(((x, g) for g, x in (v.get("cpu_by_group") or {}).items() if x >= 3), reverse=True)[:3]
+    disk_now = "nothing is being pushed to disk" if calm else f"it is pushing {out_mb:.0f} MB a minute to disk"
+    if cpu_now is not None and cpu_now >= 60:
+        who = f" ({', '.join(f'{g} {x:.0f}%' for x, g in cpu_top)})" if cpu_top else ""
+        status_line = (f"Right now the processors are {min(cpu_now, 100):.0f}% busy{who}, enough to run warm and loud. "
+                       + ("Memory is fine: nothing is being pushed to disk." if calm else f"And {disk_now}."))
+    elif calm:
+        status_line = "Right now it is quiet: nothing is being pushed to disk" + (f", and the processors are {cpu_now:.0f}% busy." if cpu_now is not None else ".")
+    else:
+        status_line = f"Right now {disk_now}" + (f", and the processors are {cpu_now:.0f}% busy." if cpu_now is not None else ".")
     peak_when = dt.datetime.strptime(T[pk], "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M")
     swap_when = dt.datetime.strptime(LT[lpk], "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M")
 
@@ -565,7 +576,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 /* motion: everything enters on panel change; reduced motion keeps it still */
 @media(prefers-reduced-motion:no-preference){{
  .on .en{{animation:pop .7s cubic-bezier(.3,1.5,.5,1) both;animation-delay:calc(var(--n,0)*90ms)}}
- .on .ts .need,.on .ts .ram{{animation:draw 2.4s cubic-bezier(.6,0,.2,1) both}}
+ .on .ts .need,.on .ts .ram{{animation:draw 2.4s cubic-bezier(.6,0,.2,1) backwards}}
  .on .drops .dr{{animation:drip 2.6s ease-in var(--d) infinite}}
  .on .hist .col{{animation:stack .6s cubic-bezier(.3,1.6,.5,1) both;animation-delay:calc(var(--i)*12ms)}}
  .on .fill{{animation:fillup 1.6s cubic-bezier(.2,.8,.2,1) both}}
@@ -578,7 +589,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
  .spinner{{animation:spin 1.4s linear infinite;transform-origin:center;transform-box:fill-box}}
 }}
 @keyframes pop{{from{{opacity:0;transform:translateY(18px) scale(.96)}}}}
-@keyframes draw{{from{{stroke-dasharray:3000;stroke-dashoffset:3000}}to{{stroke-dasharray:3000;stroke-dashoffset:0}}}}
+@keyframes draw{{from{{stroke-dasharray:1;stroke-dashoffset:1}}to{{stroke-dasharray:1;stroke-dashoffset:0}}}}
 @keyframes drip{{0%{{transform:translateY(-8px);opacity:0}}20%{{opacity:1}}70%{{transform:none}}100%{{transform:none}}}}
 @keyframes stack{{from{{transform:translateY(30px);opacity:0}}}}
 @keyframes fillup{{from{{transform:scaleY(0)}}}}
@@ -634,8 +645,8 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <polygon class=over points="{area}" clip-path="url(#above)"/>
 <line class=ceil x1=0 x2={W} y1={ram_y:.1f} y2={ram_y:.1f} />
 <text x=8 y={ram_y + 20:.1f} class=tk>{TOTAL:.0f} GB: all the memory this Mac has</text>
-<polyline class=ram points="{upts}"/>
-<polyline class=need points="{pts}"/>
+<polyline class=ram pathLength=1 points="{upts}"/>
+<polyline class=need pathLength=1 points="{pts}"/>
 <g transform="translate({px:.1f} {py:.1f})"><line x1=0 y1=0 x2=0 y2=-46 stroke="var(--fg)" stroke-width=2 />
 <path class=flagb d="M0 -46 h{-74 if flag_left else 74} v22 h{74 if flag_left else -74}z" fill="var(--hot)"/>
 <text x="{-37 if flag_left else 37}" y=-30 text-anchor=middle fill="#fff" font-family="Fredoka,sans-serif" font-weight=700 font-size=14>{gb(peak)} GB</text>
