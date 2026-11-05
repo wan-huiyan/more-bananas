@@ -16,7 +16,7 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
 1. **Recommendation**: the RAM and storage to buy. RAM = highest memory need ever recorded × 1.25, rounded up
    to a size Macs are sold in (16/24/32/36/48/64/96/128 GB); a budget pick = smallest size that covered 99%
    of working minutes (7am to midnight). Shows the share of working minutes each size would have handled,
-   with and without the hidden test browsers Claude opens, how many working days are measured (goal 10).
+   and how many working days are measured (goal 10).
    Processors: a first-guess chip = fewest cores (8 to 16) that would have kept up in 9 working minutes of 10,
    where "kept up" means the 1-minute load average was at or below the core count. Storage = current disk use × 1.5.
    A "what held it up" bar on top splits working minutes into processors, memory, both and heat; the bigger

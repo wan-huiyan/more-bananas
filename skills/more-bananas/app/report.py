@@ -420,7 +420,6 @@ def render(v):
     apps_all = v["apps"]
     work = [(t, x) for t, x in all_need if 7 <= int(t[11:13]) < 24]
     split_t = min((t for t, d_ in apps_all.items() if BR in d_), default=None)
-    work_nb = [(t, x - apps_all.get(t, {}).get(BR, 0)) for t, x in work if split_t and t >= split_t]
     def fits(sz, vals):
         return sum(x <= sz for _, x in vals) / max(len(vals), 1)
     LADDER = sorted({16, 24, 32, 36, 48, 64, int(round(TOTAL))})
@@ -433,8 +432,7 @@ def render(v):
     for sz in LADDER:
         f_ = fits(sz, work)
         tag = " &middot; this Mac" if sz == TOTAL else " &middot; recommended" if sz == rec else " &middot; budget pick" if sz == budget else ""
-        nb = f'<i>without Claude&#x27;s test browsers: {fits(sz, work_nb):.0%}</i>' if work_nb else ""
-        ladder += (f'<div class="row lad{" me" if sz == rec else ""}" data-sz="{sz}" style="--i:{LADDER.index(sz)}"><span><b>{sz} GB</b>{tag}<br>{nb}</span>'
+        ladder += (f'<div class="row lad{" me" if sz == rec else ""}" data-sz="{sz}" style="--i:{LADDER.index(sz)}"><span><b>{sz} GB</b>{tag}</span>'
                    f'<div class=track><b style="--w:{max(f_ * 100, 2):.0f}%"></b></div><em>{f_:.0%}</em></div>')
     cpu_rows = []
     cp_ = os.path.join(v["HOME"], "cpu.csv")
@@ -478,7 +476,7 @@ def render(v):
     else:
         verdict = ""
 
-    lesson = lesson_html(TOTAL=TOTAL, work=work, wdays=wdays, work_nb=work_nb, fits=fits, LADDER=LADDER, peak_ever=peak_ever,
+    lesson = lesson_html(TOTAL=TOTAL, work=work, wdays=wdays, fits=fits, LADDER=LADDER, peak_ever=peak_ever,
                          peak_ever_when=peak_ever_when, target=target, rec=rec, budget=budget, fit16=fit16, disk_used=disk_used,
                          disk_txt=disk_txt, disk_rec=disk_rec, n_wd=n_wd, WD_GOAL=WD_GOAL,
                          cpu=dict(ok=cpu_ok, cores=cores, chip=chip, chip_b=chip_b, up=chip_up, wait=wait_pct, days=cpu_days,
@@ -735,7 +733,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 {verdict}
 <div class=two>
 <div class="c en ladders{" cpufirst" if cpu_first and cpu_ok else ""}" style="--n:2"><div class=lmem><small>Memory: share of working minutes each size would have handled</small><div class="list ladder meml">{ladder}</div>
-<p class=note id=rec-note style="margin-top:10px">{len(work):,} working minutes, 7am to midnight{f'; the small &ldquo;without&rdquo; figures take out the hidden test browsers Claude opens, and cover only minutes since {split_t}, when those were first measured apart' if work_nb else ''}.</p></div>
+<p class=note id=rec-note style="margin-top:10px">{len(work):,} working minutes, 7am to midnight.</p></div>
 {f"""<div class=lcpu id=rec-cpu><small>Processors: share of working minutes a chip with this many cores would have kept up</small><div class="list ladder cpul">{cl_rows}</div>
 <p class=note style="margin-top:10px">{len(loadw):,} working minutes on {cpu_days} working day{"s" if cpu_days != 1 else ""}, so this is a first guess. It counts cores only; newer chips&#x27; cores are faster than this Mac&#x27;s, so it overstates what you need.</p></div>""" if cpu_ok else ""}</div>
 <div class="c en" id=rec-jars style="--n:3"><svg class=jars viewBox="0 -60 1000 440" role=img aria-label="A {TOTAL:.0f} GB jar holding the busiest minute's {peak_ever:.1f} GB, next to a {rec} GB jar holding it with room to spare">{jars}</svg></div>
@@ -949,7 +947,7 @@ let seen = false; try {{ seen = sessionStorage.getItem("mm-seen") === "1"; sessi
 
 # ---------- Recommendation: the buddy teaches how it got to the answer ----------
 # Every number comes from the readings. Steps that do not apply to this Mac are left out.
-def lesson_html(*, TOTAL, work, wdays, work_nb, fits, LADDER, peak_ever, peak_ever_when, target, rec, budget, fit16,
+def lesson_html(*, TOTAL, work, wdays, fits, LADDER, peak_ever, peak_ever_when, target, rec, budget, fit16,
                 disk_used, disk_txt, disk_rec, n_wd, WD_GOAL, cpu):
     def row(sz):
         return f".lad[data-sz='{sz}']" if sz in LADDER else ""
@@ -966,12 +964,6 @@ def lesson_html(*, TOTAL, work, wdays, work_nb, fits, LADDER, peak_ever, peak_ev
     steps.append((row(me), f"{TOTAL:.0f} GB was enough in {'only ' if fit16 < .9 else ''}<b>{fit16:.0%} of those minutes</b>."
                            + (" The rest of the time, part of what you had open sat on the disk." if fit16 < 1 else ""),
                   "fit", {"sz": me, "pct": round(fit16 * 100)}))
-    if work_nb:
-        nb = fits(me, work_nb)
-        if nb >= fit16 + .05:
-            steps.append((row(me), f"Without the hidden test browsers Claude opens, {TOTAL:.0f} GB would have been enough "
-                                   f"<b>{nb:.0%} of the time</b>. They are part of the work, so my answer still counts them.",
-                          "nobrowsers", {"sz": me, "pct": round(fit16 * 100), "nb": round(nb * 100)}))
     if rec > TOTAL and budget != rec and budget > TOTAL:
         steps.append((row(budget), f"<b>{budget} GB</b> would have covered 99% of minutes. That is the budget pick: "
                                    "enough for today, with little room to grow.",
@@ -1051,10 +1043,8 @@ LESSON_CSS = """
 .sc-x{pointer-events:none}
 .sc-disk{position:absolute;top:0;bottom:0;right:0;border-radius:0 9px 9px 0;background:repeating-linear-gradient(45deg,color-mix(in oklab,var(--hot) 55%,transparent) 0 6px,transparent 6px 12px);
  background-size:17px 17px;transform-origin:left;animation:scgrow .8s cubic-bezier(.16,1,.3,1) both,scslide 1.2s linear infinite}
-.sc-ghost{position:absolute;top:-3px;bottom:-3px;border-radius:9px;border:2px dashed #c99700;background:repeating-linear-gradient(45deg,rgba(255,217,59,.6) 0 6px,transparent 6px 12px);
- transform-origin:left;animation:scgrow .9s cubic-bezier(.16,1,.3,1) both}
 .sc-tag{position:absolute;bottom:calc(100% + 6px);white-space:nowrap;font:600 12.5px Geist,sans-serif;animation:scfade .35s .55s both}
-.sc-disk .sc-tag{right:0;color:var(--hot)} .sc-ghost .sc-tag{left:0;color:#9a7400}
+.sc-disk .sc-tag{right:0;color:var(--hot)}
 .sc-line{position:absolute;width:0;border-left:2px dashed var(--fg);transform-origin:top;animation:scdrop .7s cubic-bezier(.16,1,.3,1) both}
 .sc-line .sc-tag{left:6px;bottom:auto;top:-22px;color:var(--fg)}
 .sc-meas line{stroke:var(--fg);stroke-width:3;stroke-dasharray:8 7;opacity:0;transition:opacity .3s,y1 .9s cubic-bezier(.16,1,.3,1),y2 .9s cubic-bezier(.16,1,.3,1)}
@@ -1080,7 +1070,7 @@ LESSON_CSS = """
 @keyframes scdrop{from{transform:scaleY(0)}} @keyframes scrise{from{opacity:0;transform:translateY(10px)}} @keyframes scpop{from{transform:scale(.3);opacity:0}}
 @keyframes scslam{0%{transform:scale(1.55)}55%{transform:scale(.94)}100%{transform:scale(1)}}
 @media(prefers-reduced-motion:reduce){#p-rec .hero>*,#p-rec .two>.c,#p-rec .specs>.c,#p-rec .ladder .row,.sc-meas line,.sc-meas text{transition:none}
- .sc-disk,.sc-ghost,.sc-tag,.sc-line,.sc-call,.sc-gauge i,.sc-leg i,.sc-days i.y,.sc-meas .t3.on,.sc-slam{animation:none}}
+ .sc-disk,.sc-tag,.sc-line,.sc-call,.sc-gauge i,.sc-leg i,.sc-days i.y,.sc-meas .t3.on,.sc-slam{animation:none}}
 @media(max-width:760px){.lesson{flex-direction:column;align-items:stretch;border-radius:22px;text-align:left}.lesson:before{display:none}.lesson .ctl{justify-content:center}}
 """
 
@@ -1173,10 +1163,6 @@ LESSON_JS = r"""<script>
     fit(d) { const r = lad(d.sz); if (!r) return; dim("sc-on", "sc-rows"); lead(r.closest(".c"), r);
       fill(r, d.pct, 300);
       if (d.pct < 100) later(() => add(r.querySelector(".track"), `<span class=sc-tag>${100 - d.pct}% of minutes: some of it on the disk</span>`, "sc-disk").style.left = d.pct + "%", 1500); },
-    nobrowsers(d) { const r = lad(d.sz); if (!r) return; dim("sc-on", "sc-rows"); lead(r.closest(".c"), r);
-      const t = r.querySelector(".track");
-      const gh = add(t, `<span class=sc-tag>with Claude's test browsers closed: ${d.nb}%</span>`, "sc-ghost"); gh.style.left = d.pct + "%"; gh.style.width = (d.nb - d.pct) + "%";
-      if (d.nb < 100) later(() => add(t, "", "sc-disk").style.left = d.nb + "%", 900); },
     budget(d) { const r = lad(d.sz); if (!r) return; const lc = P.querySelector(".ladder.meml"), tr = [...lc.querySelectorAll(".track")];
       dim("sc-on", "sc-soft"); lead(r.closest(".c"), r);
       const a = tr[0].getBoundingClientRect(), z = tr[tr.length - 1].getBoundingClientRect(), o = lc.getBoundingClientRect(); lc.style.position = "relative";
