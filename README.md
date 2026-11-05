@@ -42,8 +42,8 @@ This measures instead. It reads macOS's own memory figures once a minute, keeps 
 ## See it in action
 
 <p align="center">
-  <img src="docs/demo/lesson.gif" width="860" alt="The buddy on the Recommendation tab holds a pointer and explains its answer one step at a time, while each step's chart row or card lights up"/>
-  <br/><sub><b>🧑‍🏫 The buddy shows its working.</b> On the Recommendation tab it explains the answer one step at a time, pointing at the row or card each step is about: how many minutes it watched, the busiest minute, how often your RAM was enough, the budget pick, the size it recommends and why, and storage. Every number comes from your own readings, and steps that don't apply to your Mac are left out. Pause, step back, or replay any time.</sub>
+  <img src="docs/demo/lesson.gif" width="860" alt="The buddy on the Recommendation tab explains its answer one step at a time while the page's own charts act out each step: bars regrow, the spill turns into red stripes, a 99% line drops, the jar comes forward and is measured"/>
+  <br/><sub><b>🧑‍🏫 The buddy shows its working.</b> On the Recommendation tab it explains the answer one step at a time, and the page's own charts act out each step: the bars regrow as it counts the minutes, the part that didn't fit turns into red &ldquo;on the disk&rdquo; stripes, a 99% line drops for the budget pick, and the jar comes forward to be measured (busiest minute, plus a quarter, rounded up to a size Macs come in). Storage and days measured get their own little gauges. Every number comes from your own readings, and steps that don't apply to your Mac are left out. Pause, step back, or replay any time.</sub>
 </p>
 
 <table>

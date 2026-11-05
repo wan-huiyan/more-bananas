@@ -371,7 +371,7 @@ def render(v):
 
     lesson = lesson_html(TOTAL=TOTAL, work=work, wdays=wdays, work_nb=work_nb, fits=fits, LADDER=LADDER, peak_ever=peak_ever,
                          peak_ever_when=peak_ever_when, target=target, rec=rec, budget=budget, fit16=fit16, disk_used=disk_used,
-                         disk_txt=disk_txt, n_wd=n_wd, WD_GOAL=WD_GOAL)
+                         disk_txt=disk_txt, disk_rec=disk_rec, n_wd=n_wd, WD_GOAL=WD_GOAL)
 
     # ---------- Busy hours: the takeaway ----------
     over_cells = sorted(((x, k) for k, x in wcell.items() if x > TOTAL), reverse=True)
@@ -797,50 +797,52 @@ let seen = false; try {{ seen = sessionStorage.getItem("mm-seen") === "1"; sessi
 # ---------- Recommendation: the buddy teaches how it got to the answer ----------
 # Every number comes from the readings. Steps that do not apply to this Mac are left out.
 def lesson_html(*, TOTAL, work, wdays, work_nb, fits, LADDER, peak_ever, peak_ever_when, target, rec, budget, fit16,
-                disk_used, disk_txt, n_wd, WD_GOAL):
+                disk_used, disk_txt, disk_rec, n_wd, WD_GOAL):
     def row(sz):
         return f".lad[data-sz='{sz}']" if sz in LADDER else ""
     me = int(round(TOTAL))
     nd = len(wdays)
+    # (what the stick points at, what the bubble says, the scene the page acts out, that scene's numbers)
     steps = [("#rec-note", f"I watched <b>{len(work):,} working minutes</b>, 7am to midnight, over {nd} day{'s' if nd != 1 else ''}. "
-                           "Here is how I got from those to my answer.")]
-    if peak_ever > TOTAL:
-        steps.append(("#rec-jars", f"The busiest minute, {peak_ever_when}, needed <b>{peak_ever:.1f} GB</b>. "
-                                   f"This Mac has {TOTAL:.0f}, so {peak_ever - TOTAL:.1f} GB of it had to wait on the disk."))
-    else:
-        steps.append(("#rec-jars", f"The busiest minute, {peak_ever_when}, needed <b>{peak_ever:.1f} GB</b>. "
-                                   f"This Mac has {TOTAL:.0f}, so even that minute fitted."))
+                           "Here is how I got from those to my answer.", "minutes", {"n": len(work)})]
+    spill = peak_ever > TOTAL
+    steps.append(("#rec-jars", f"The busiest minute, {peak_ever_when}, needed <b>{peak_ever:.1f} GB</b>. "
+                               + (f"This Mac has {TOTAL:.0f}, so {peak_ever - TOTAL:.1f} GB of it had to wait on the disk." if spill else
+                                  f"This Mac has {TOTAL:.0f}, so even that minute fitted."),
+                  "jar", {"jar": 0}))
     steps.append((row(me), f"{TOTAL:.0f} GB was enough in {'only ' if fit16 < .9 else ''}<b>{fit16:.0%} of those minutes</b>."
-                           + (" The rest of the time, part of what you had open sat on the disk." if fit16 < 1 else "")))
+                           + (" The rest of the time, part of what you had open sat on the disk." if fit16 < 1 else ""),
+                  "fit", {"sz": me, "pct": round(fit16 * 100)}))
     if work_nb:
         nb = fits(me, work_nb)
         if nb >= fit16 + .05:
             steps.append((row(me), f"Without the hidden test browsers Claude opens, {TOTAL:.0f} GB would have been enough "
-                                   f"<b>{nb:.0%} of the time</b>. Closing those is free; more memory is not."))
+                                   f"<b>{nb:.0%} of the time</b>. Closing those is free; more memory is not.",
+                          "nobrowsers", {"sz": me, "pct": round(fit16 * 100), "nb": round(nb * 100)}))
     if rec > TOTAL and budget != rec and budget > TOTAL:
         steps.append((row(budget), f"<b>{budget} GB</b> would have covered 99% of minutes. That is the budget pick: "
-                                   "enough for today, with little room to grow."))
-    if rec > TOTAL:
-        steps.append((", ".join(x for x in (row(rec), "#rec-mem") if x),
-                      f"For my answer I take the busiest minute, {peak_ever:.1f} GB, and add a quarter for a heavier week: "
-                      f"{target:.1f} GB. The next size Macs come in is <b>{rec} GB</b>."))
-    else:
-        steps.append(("#rec-mem", f"For my answer I take the busiest minute, {peak_ever:.1f} GB, and add a quarter for a heavier week: "
-                                  f"{target:.1f} GB. This Mac already has <b>{TOTAL:.0f} GB</b>."))
+                                   "enough for today, with little room to grow.",
+                      "budget", {"sz": budget, "pct": round(fits(budget, work) * 100)}))
+    jar_i, cap = (1, rec) if rec > TOTAL else (0, int(round(TOTAL)))
+    steps.append(("#rec-jars, #rec-mem",
+                  f"For my answer I take the busiest minute, {peak_ever:.1f} GB, and add a quarter for a heavier week: {target:.1f} GB. "
+                  + (f"The next size Macs come in is <b>{rec} GB</b>." if rec > TOTAL else f"This Mac already has <b>{TOTAL:.0f} GB</b>."),
+                  "measure", {"jar": jar_i, "cap": cap, "a": round(peak_ever, 1), "b": round(target, 1)}))
     steps.append(("#rec-disk", f"Storage: <b>{disk_used:.0f} GB</b> is in use now. Half again for growth makes "
-                               f"{disk_used * 1.5:.0f} GB, so <b>{disk_txt}</b>."))
+                               f"{disk_used * 1.5:.0f} GB, so <b>{disk_txt}</b>.",
+                  "disk", {"used": round(disk_used), "need": round(disk_used * 1.5), "cap": disk_rec, "label": disk_txt}))
     steps.append(("#rec-days", f"I have measured {n_wd} of {WD_GOAL} working days so far. A busier week could change this, "
-                               "so keep me running."))
+                               "so keep me running.", "days", {"n": n_wd, "goal": WD_GOAL}))
     steps.append(("#rec-h1", f"So: <b>{rec} GB</b> of memory and <b>{disk_txt}</b> of storage." if rec > TOTAL else
-                             f"So: this Mac&#x27;s <b>{TOTAL:.0f} GB</b> is enough for now. Look again after a busy week."))
+                             f"So: this Mac&#x27;s <b>{TOTAL:.0f} GB</b> is enough for now. Look again after a busy week.",
+                  "sum", {}))
     n = len(steps)
-    items = "".join(f'<li data-t="{t}"{" class=on" if k == 0 else ""}><span class=k>{k + 1} of {n}</span>{x}</li>'
-                    for k, (t, x) in enumerate(steps))
+    items = "".join(f'<li data-t="{t}" data-scene="{sc}" data-d=\'{json.dumps(d)}\'{" class=on" if k == 0 else ""}>'
+                    f'<span class=k>{k + 1} of {n}</span>{x}</li>' for k, (t, x, sc, d) in enumerate(steps))
     return (f'<div class="lesson en" id=lesson style="--n:1"><ol aria-label="How the buddy worked out the answer">{items}</ol>'
             '<div class=ctl><button type=button class=lp aria-label="Previous step">&lsaquo;</button><span class=ld aria-hidden=true></span>'
             '<button type=button class=lt aria-label="Pause the lesson"></button>'
             '<button type=button class=ln aria-label="Next step">&rsaquo;</button></div></div>')
-
 
 LESSON_CSS = """
 /* the lesson: one speech bubble, one step at a time; all steps share one grid cell so the bubble never changes height */
@@ -873,6 +875,48 @@ LESSON_CSS = """
 #p-rec .buddy svg.nod{animation:nod .34s ease-out}
 @keyframes nod{40%{transform:translateY(4px)}}
 @media(prefers-reduced-motion:reduce){.lesson li,.lesson li.on,.lesson-t,#p-rec .stick,.lesson .ld i{transition:none}#p-rec .buddy svg.nod{animation:none}}
+
+/* scenes: on each step the page's own pictures act it out. Everything else fades back; nothing changes size. */
+#p-rec .hero>*,#p-rec .two>.c,#p-rec .specs>.c,#p-rec .ladder .row{transition:opacity .4s ease-out,transform .6s cubic-bezier(.2,.9,.25,1)}
+#p-rec.sc-on .hero>:not(#lesson):not(.buddy-wrap),#p-rec.sc-on .two>.c:not(.sc-lead),#p-rec.sc-on .specs>.c:not(.sc-lead){opacity:.2}
+#p-rec.sc-rows .ladder .row:not(.sc-lead){opacity:.3}
+#p-rec.sc-soft .ladder .row:not(.sc-lead){opacity:.55}
+#rec-jars.sc-fwd{position:relative;z-index:6;background:var(--bg);box-shadow:0 18px 50px rgba(29,42,68,.18)}
+#rec-jars .jar{transition:opacity .4s}
+#rec-jars .jar.sc-back{opacity:.25}
+.sc-x{pointer-events:none}
+.sc-disk{position:absolute;top:0;bottom:0;right:0;border-radius:0 9px 9px 0;background:repeating-linear-gradient(45deg,color-mix(in oklab,var(--hot) 55%,transparent) 0 6px,transparent 6px 12px);
+ background-size:17px 17px;transform-origin:left;animation:scgrow .8s cubic-bezier(.16,1,.3,1) both,scslide 1.2s linear infinite}
+.sc-ghost{position:absolute;top:-3px;bottom:-3px;border-radius:9px;border:2px dashed #c99700;background:repeating-linear-gradient(45deg,rgba(255,217,59,.6) 0 6px,transparent 6px 12px);
+ transform-origin:left;animation:scgrow .9s cubic-bezier(.16,1,.3,1) both}
+.sc-tag{position:absolute;bottom:calc(100% + 6px);white-space:nowrap;font:600 12.5px Geist,sans-serif;animation:scfade .35s .55s both}
+.sc-disk .sc-tag{right:0;color:var(--hot)} .sc-ghost .sc-tag{left:0;color:#9a7400}
+.sc-line{position:absolute;width:0;border-left:2px dashed var(--fg);transform-origin:top;animation:scdrop .7s cubic-bezier(.16,1,.3,1) both}
+.sc-line .sc-tag{left:6px;bottom:auto;top:-22px;color:var(--fg)}
+.sc-meas line{stroke:var(--fg);stroke-width:3;stroke-dasharray:8 7;opacity:0;transition:opacity .3s,y1 .9s cubic-bezier(.16,1,.3,1),y2 .9s cubic-bezier(.16,1,.3,1)}
+.sc-meas .m2{stroke:#e8590c}
+.sc-meas text{font:600 21px Geist,sans-serif;fill:var(--fg);opacity:0;transition:opacity .35s}
+.sc-meas .t2{fill:#e8590c} .sc-meas .t3{font:700 34px Fredoka,sans-serif}
+.sc-meas .on{opacity:1}
+.sc-meas .t3.on,.sc-slam{animation:scslam .3s cubic-bezier(.2,.8,.2,1) both;transform-box:fill-box;transform-origin:center}
+#rec-jars.sc-fwd .jtag.good{opacity:0}
+.sc-call{position:absolute;left:0;right:0;bottom:calc(100% + 12px);z-index:7;padding:12px 14px;border-radius:18px;background:var(--bg);border:2px solid var(--line);
+ box-shadow:0 10px 30px rgba(29,42,68,.14);font:500 13px Geist,sans-serif;color:var(--mute);animation:scrise .45s cubic-bezier(.2,.9,.25,1) both}
+.sc-gauge{position:relative;height:16px;border-radius:9px;background:var(--line);margin:8px 0 8px}
+.sc-gauge i{position:absolute;left:0;top:0;bottom:0;border-radius:9px;transform-origin:left;animation:scgrow .9s cubic-bezier(.16,1,.3,1) both}
+.sc-gauge .u{background:linear-gradient(90deg,var(--banana),#f0a500)}
+.sc-gauge .h{background:repeating-linear-gradient(45deg,rgba(201,151,0,.55) 0 6px,transparent 6px 12px);border:2px dashed #c99700;top:-3px;bottom:-3px}
+.sc-leg{display:flex;justify-content:space-between;gap:8px;font:600 12.5px Geist,sans-serif;color:var(--fg)}
+.sc-leg i{font-style:normal;white-space:nowrap;animation:scfade .3s both} .sc-leg .e2{color:#9a7400} .sc-leg .end{margin-left:auto}
+.sc-days{display:flex;gap:6px;margin-top:4px}
+.sc-days i{flex:1;height:22px;border-radius:7px;border:2px dashed var(--line)}
+.sc-days i.y{border:0;background:linear-gradient(180deg,var(--banana),#f0a500);animation:scpop .4s cubic-bezier(.3,1.6,.5,1) both}
+.specs .c.sc-pop{transform:translateY(-6px);outline:3px solid var(--banana);outline-offset:4px}
+@keyframes scgrow{from{transform:scaleX(0)}} @keyframes scslide{to{background-position:17px 0}} @keyframes scfade{from{opacity:0;transform:translateY(4px)}}
+@keyframes scdrop{from{transform:scaleY(0)}} @keyframes scrise{from{opacity:0;transform:translateY(10px)}} @keyframes scpop{from{transform:scale(.3);opacity:0}}
+@keyframes scslam{0%{transform:scale(1.55)}55%{transform:scale(.94)}100%{transform:scale(1)}}
+@media(prefers-reduced-motion:reduce){#p-rec .hero>*,#p-rec .two>.c,#p-rec .specs>.c,#p-rec .ladder .row,.sc-meas line,.sc-meas text{transition:none}
+ .sc-disk,.sc-ghost,.sc-tag,.sc-line,.sc-call,.sc-gauge i,.sc-leg i,.sc-days i.y,.sc-meas .t3.on,.sc-slam{animation:none}}
 @media(max-width:760px){.lesson{flex-direction:column;align-items:stretch;border-radius:22px;text-align:left}.lesson:before{display:none}.lesson .ctl{justify-content:center}}
 """
 
@@ -919,13 +963,98 @@ LESSON_JS = r"""<script>
     a = Math.max(22, Math.min(105, a));  // never across the headline
     if (ang === null || Math.abs(a - ang) > .5) { ang = a; stick.style.transform = `rotate(${a.toFixed(1)}deg)`; }
   };
+
+  // Scenes: the page's own charts act out each step. Numbers come from the step's data-d, written by report.py.
+  const NS = "http://www.w3.org/2000/svg", wide = () => !matchMedia("(max-width: 760px)").matches;
+  const jarsCard = document.getElementById("rec-jars"), jarSvg = jarsCard && jarsCard.querySelector("svg");
+  const lad = sz => P.querySelector(`.lad[data-sz='${sz}']`);
+  P.querySelectorAll(".lad").forEach(r => { const b = r.querySelector(".track b"); r.dataset.w = b.style.getPropertyValue("--w"); r.dataset.em = r.querySelector("em").textContent; });
+  let ST = [];
+  const later = (f, ms) => ST.push(setTimeout(f, calm ? 0 : ms));
+  const count = (el, from, to, ms, fmt) => { if (calm) { el.textContent = fmt(to); return; } const t0 = performance.now();
+    const f = () => { const q = Math.min((performance.now() - t0) / ms, 1); el.textContent = fmt(q >= 1 ? to : from + (to - from) * (1 - Math.pow(2, -10 * q))); if (q < 1 && ST.length) requestAnimationFrame(f); }; f(); };
+  const pct = v => Math.round(v) + "%";
+  const fill = (r, to, delay) => { const b = r.querySelector(".track b"), em = r.querySelector("em");
+    b.style.transition = "none"; b.style.setProperty("--w", "2%"); em.textContent = "0%"; void b.offsetWidth;
+    later(() => { b.style.transition = "width 1.1s cubic-bezier(.16,1,.3,1)"; b.style.setProperty("--w", to + "%"); count(em, 0, to, 1100, pct); }, delay); };
+  // On a phone the step's target is often below the fold, so fading the rest would only dim what is on screen.
+  const dim = (...c) => wide() && P.classList.add(...c);
+  const lead = (...els) => els.forEach(e => e && e.classList.add("sc-lead"));
+  const replay = g => g && g.getAnimations({ subtree: true }).forEach(a => { a.cancel(); a.play(); });
+  // Bring the jars card forward into the space under the speech bubble, as large as fits there (never over the bubble).
+  const forward = () => { if (!jarsCard || !wide()) return; const r = jarsCard.getBoundingClientRect(), top = L.getBoundingClientRect().bottom + 14,
+      room = Math.min(innerHeight, P.getBoundingClientRect().bottom) - top - 14, s = Math.max(1, Math.min(1.28, room / r.height, innerWidth * .8 / r.width));
+    jarsCard.classList.add("sc-fwd"); jarsCard.style.transform = `translate(${innerWidth / 2 - (r.left + r.width / 2)}px,${top + Math.max(room, r.height * s) / 2 - (r.top + r.height / 2)}px) scale(${s})`; };
+  const add = (parent, html, cls) => { const d = document.createElement("div"); d.className = "sc-x " + cls; d.innerHTML = html; parent.appendChild(d); return d; };
+  const reset = () => {
+    ST.forEach(clearTimeout); ST = [];
+    P.classList.remove("sc-on", "sc-rows", "sc-soft");
+    P.querySelectorAll(".sc-lead,.sc-pop,.sc-back,.sc-slam").forEach(e => e.classList.remove("sc-lead", "sc-pop", "sc-back", "sc-slam"));
+    P.querySelectorAll(".sc-x").forEach(e => e.remove()); jarSvg && jarSvg.querySelector(".sc-meas")?.remove();
+    if (jarsCard) { jarsCard.style.transform = ""; jarsCard.classList.remove("sc-fwd"); }
+    P.querySelectorAll(".lad").forEach(r => { const b = r.querySelector(".track b"); b.style.transition = ""; b.style.setProperty("--w", r.dataset.w); r.querySelector("em").textContent = r.dataset.em; });
+    const note = document.getElementById("rec-note"); if (note && note.dataset.t) note.innerHTML = note.dataset.t;
+  };
+  const SC = {
+    minutes(d) { const card = P.querySelector(".ladder").closest(".c"), note = document.getElementById("rec-note");
+      dim("sc-on"); lead(card);
+      P.querySelectorAll(".lad").forEach((r, k) => fill(r, parseInt(r.dataset.em), 120 + k * 90));
+      note.dataset.t = note.innerHTML; const n = d.n.toLocaleString("en-GB");
+      note.innerHTML = note.innerHTML.replace(n, `<b class=sc-n>${n}</b>`); const el = note.querySelector(".sc-n");
+      if (el) count(el, 0, d.n, 1400, v => Math.round(v).toLocaleString("en-GB")); },
+    jar(d) { const g = jarSvg && jarSvg.querySelectorAll(".jar"); if (!g) return;
+      dim("sc-on"); lead(jarsCard); forward();
+      g.forEach((x, k) => x.classList.toggle("sc-back", k !== d.jar));
+      later(() => replay(g[d.jar]), 450); later(() => g[d.jar].querySelector(".jtag")?.classList.add("sc-slam"), 1700); },
+    fit(d) { const r = lad(d.sz); if (!r) return; dim("sc-on", "sc-rows"); lead(r.closest(".c"), r);
+      fill(r, d.pct, 300);
+      if (d.pct < 100) later(() => add(r.querySelector(".track"), `<span class=sc-tag>${100 - d.pct}% of minutes: some of it on the disk</span>`, "sc-disk").style.left = d.pct + "%", 1500); },
+    nobrowsers(d) { const r = lad(d.sz); if (!r) return; dim("sc-on", "sc-rows"); lead(r.closest(".c"), r);
+      const t = r.querySelector(".track");
+      const gh = add(t, `<span class=sc-tag>with Claude's test browsers closed: ${d.nb}%</span>`, "sc-ghost"); gh.style.left = d.pct + "%"; gh.style.width = (d.nb - d.pct) + "%";
+      if (d.nb < 100) later(() => add(t, "", "sc-disk").style.left = d.nb + "%", 900); },
+    budget(d) { const r = lad(d.sz); if (!r) return; const lc = P.querySelector(".ladder"), tr = [...lc.querySelectorAll(".track")];
+      dim("sc-on", "sc-soft"); lead(r.closest(".c"), r);
+      const a = tr[0].getBoundingClientRect(), z = tr[tr.length - 1].getBoundingClientRect(), o = lc.getBoundingClientRect(); lc.style.position = "relative";
+      const ln = add(lc, "<span class=sc-tag>99% of minutes</span>", "sc-line");
+      Object.assign(ln.style, { left: (a.left - o.left + a.width * .99) + "px", top: (a.top - o.top - 6) + "px", height: (z.bottom - a.top + 12) + "px" });
+      fill(r, d.pct, 700); },
+    measure(d) { const g = jarSvg && jarSvg.querySelectorAll(".jar"); if (!g) return;
+      dim("sc-on"); lead(jarsCard, document.getElementById("rec-mem")); forward();
+      g.forEach((x, k) => x.classList.toggle("sc-back", k !== d.jar));
+      const cx = d.jar ? 740 : 260, y = v => 300 - 210 * v / d.cap, X0 = cx - 95, X1 = cx + 95;
+      const m = document.createElementNS(NS, "g"); m.setAttribute("class", "sc-meas"); jarSvg.appendChild(m);
+      m.innerHTML = `<line class=m1 x1="${X0 - 6}" x2="${X1 + 10}" y1="${y(d.a)}" y2="${y(d.a)}"/><text class=t1 x="${X1 + 18}" y="${y(d.a) + 7}">busiest ${d.a} GB</text>`
+        + `<line class=m2 x1="${X0 - 6}" x2="${X1 + 10}" y1="${y(d.a)}" y2="${y(d.a)}"/><text class=t2 x="${X1 + 18}" y="${y(d.b) + 7}">+ ¼ = ${d.b} GB</text>`
+        + `<text class=t3 x="${cx}" y="64" text-anchor=middle>${d.cap} GB</text>`;
+      later(() => replay(g[d.jar]), 450);
+      later(() => { m.querySelector(".m1").classList.add("on"); m.querySelector(".t1").classList.add("on"); }, 1400);
+      later(() => { const l = m.querySelector(".m2"); l.classList.add("on"); l.setAttribute("y1", y(d.b)); l.setAttribute("y2", y(d.b)); m.querySelector(".t2").classList.add("on"); }, 2600);
+      later(() => m.querySelector(".t3").classList.add("on"), 3900); },
+    disk(d) { const c = document.getElementById("rec-disk"); if (!c) return; dim("sc-on"); lead(c);
+      const w = v => Math.min(v / d.cap * 100, 100).toFixed(1) + "%";
+      add(c, `<div class=sc-gauge><i class=h style="width:${w(d.need)};animation-delay:.9s"></i><i class=u style="width:${w(d.used)}"></i></div>`
+        + `<div class=sc-leg><i>in use ${d.used} GB</i><i class=e2 style="animation-delay:1.3s">+ half = ${d.need} GB</i><i class=end style="animation-delay:1.8s">fits in ${d.label}</i></div>`, "sc-call"); },
+    days(d) { const c = document.getElementById("rec-days"); if (!c) return; dim("sc-on"); lead(c);
+      add(c, `<div>${d.n} of ${d.goal} working days measured</div><div class=sc-days>`
+        + Array.from({ length: d.goal }, (_, k) => k < d.n ? `<i class=y style="animation-delay:${.3 + k * .12}s"></i>` : "<i></i>").join("") + "</div>", "sc-call"); },
+    sum() { const em = document.querySelector("#rec-h1 em"); if (em) { em.classList.remove("sc-slam"); void em.offsetWidth; later(() => em.classList.add("sc-slam"), 200); }
+      ["rec-mem", "rec-disk"].forEach((id, k) => later(() => document.getElementById(id)?.classList.add("sc-pop"), 600 + k * 260)); },
+  };
+  const scene = () => { reset(); const st = steps[i], f = SC[st.dataset.scene]; if (!f || !P.classList.contains("on")) return;
+    try { f(JSON.parse(st.dataset.d || "{}")); } catch (_) {} };
+  // Never block use: a click anywhere outside the bubble (or, on a wide screen, a scroll) puts the page back as it was.
+  // Not pointerdown: on a phone every scroll starts with one, and the reader has to scroll to reach steps 6 to 8.
+  const back = e => { if (!e.target.closest("#lesson")) reset(); };
+  P.addEventListener("click", back); P.addEventListener("wheel", e => wide() && back(e), { passive: true });
+  let sceneT = null; const later0 = f => { clearTimeout(sceneT); sceneT = setTimeout(f, calm ? 0 : 120); };
   const go = (k, keepT) => {
     tgts(i).forEach(el => el.classList.remove("lit"));
     i = Math.max(0, Math.min(n - 1, k)); if (!keepT) t = 0;
     steps.forEach((s, j) => s.classList.toggle("on", j === i));
     dots.forEach((d, j) => { d.classList.toggle("on", j === i); d.classList.toggle("done", j < i); d.style.setProperty("--p", 0); });
     tgts(i).forEach(el => el.classList.add("lit"));
-    show();
+    show(); later0(scene);
     if (svg && !calm) { svg.classList.remove("nod"); void svg.getBoundingClientRect(); svg.classList.add("nod"); }
     aim(); label(); save();
   };
@@ -937,7 +1066,7 @@ LESSON_JS = r"""<script>
   setInterval(() => {
     const now = performance.now(), dt = now - last; last = now;
     aim();
-    const on = P.classList.contains("on"); if (on && !wasOn) setTimeout(show, 450); wasOn = on;
+    const on = P.classList.contains("on"); if (on && !wasOn) { setTimeout(show, 450); later0(scene); } if (!on && wasOn) reset(); wasOn = on;
     if (!playing || !P.classList.contains("on") || document.hidden) return;
     t += dt; const d = dur(i);
     if (dots[i]) dots[i].style.setProperty("--p", Math.min(t / d, 1).toFixed(3));
