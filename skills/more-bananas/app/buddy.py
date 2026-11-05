@@ -121,10 +121,15 @@ def favicon(mood):
             "<circle cx='16' cy='12.5' r='6' fill='%23fff' stroke='%239aa3ad' stroke-width='2'/><circle cx='16' cy='13' r='2.6' fill='%237a4b23'/>"
             f"<path d='{mouth}' stroke='%235a2d0c' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>")
 
+# The yard sizes buddies by whichever held the Mac up more: the processors or memory (report.py decides).
+YARD_WORDS = {
+    "cpu": ("Who is keeping the processors busy right now", "more of the processors", "processor time", "two goggles = over 10% of the processors"),
+    "mem": ("Who is in your RAM right now", "more memory", "memory", "two goggles = over 1 GB"),
+}
 YARD = """<section class="yard-wrap rise" style="animation-delay:.2s">
-<div class=yard-head><b>Who is in your RAM right now</b><span>One buddy per app and per Claude Code session. Bigger buddy, more memory. Click one to ask.</span></div>
-<div class=yard id=yard aria-label="Animated buddies, one per app and Claude Code session, sized by memory"></div>
-<div class=yard-key><span><i style="background:#2f6fb5"></i>an app</span><span><i style="background:#d97757"></i>a Claude Code session</span><span>two goggles = over 1 GB</span></div>
+<div class=yard-head><b>__HEAD__</b><span>One buddy per app and per Claude Code session. Bigger buddy, __MORE__. Click one to ask.</span></div>
+<div class=yard id=yard aria-label="Animated buddies, one per app and Claude Code session, sized by __BY__"></div>
+<div class=yard-key><span><i style="background:#2f6fb5"></i>an app</span><span><i style="background:#d97757"></i>a Claude Code session</span><span>__TWO__</span></div>
 </section>"""
 
 YARD_CSS = """
@@ -181,10 +186,13 @@ YARD_CSS = """
 
 YARD_JS = """<script>
 (() => {
-  const crowd = __CROWD__, mood = "__MOOD__";
+  const crowd = __CROWD__, mood = "__MOOD__", WORDS = __WORDS__;
+  let byCpu = "__MEASURE__" === "cpu";
   const yard = document.getElementById("yard"); if (!yard || !crowd.length) return;
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const max = Math.max(...crowd.map(c => c.gb));
+  const size = c => byCpu ? (c.cpu || 0) : c.gb;              // what a buddy's size stands for
+  let max = Math.max(...crowd.map(size), byCpu ? 1 : .1);
+  const gbTxt = gb => gb >= 1 ? gb.toFixed(1) + " GB" : Math.round(gb * 1024) + " MB";
   // Each buddy holds the thing it is (huashu: a character's action must be about the content, not just blink and bob).
   const PROP = n => /Claude desktop/.test(n) ? "chat" : /Chrome/.test(n) ? "tabs"
     : /macOS/.test(n) ? "gear" : /Slack/.test(n) ? "chat" : /Safari/.test(n) ? "compass" : /Security/.test(n) ? "shield"
@@ -201,7 +209,7 @@ YARD_JS = """<script>
     banana: '<g class="p-banana"><path d="M14 74c6 10 24 10 30-6 1-3-1-5-2-4-1 8-12 14-28 10z" fill="#ffd93b" stroke="#c99700"/></g>'
   };
   const svg = (c, uid) => {
-    const suit = c.kind === "claude" ? "#d97757" : "#2f6fb5", suitD = c.kind === "claude" ? "#b85e40" : "#1f4d86", two = c.gb >= 1;
+    const suit = c.kind === "claude" ? "#d97757" : "#2f6fb5", suitD = c.kind === "claude" ? "#b85e40" : "#1f4d86", two = byCpu ? (c.cpu || 0) >= 10 : c.gb >= 1;
     const lens = (x, r) => `<circle cx="${x}" cy="30" r="${r}" fill="#fff" stroke="#9aa3ad" stroke-width="3"/><circle cx="${x}" cy="30" r="${r}" fill="none" stroke="#6b7480" stroke-width="1" />` +
       `<g class="pupil"><circle cx="${x}" cy="31" r="${r * .45}" fill="#7a4b23"/><circle cx="${x}" cy="31" r="${r * .22}" fill="#1b1b1b"/></g><circle cx="${x - r * .35}" cy="${30 - r * .4}" r="${r * .22}" fill="#fff" opacity=".9"/>`;
     const eyes = two ? lens(21, 8) + lens(39, 8) : lens(30, 10);
@@ -223,21 +231,36 @@ YARD_JS = """<script>
   // Deterministic placement from the name, so buddies do not jump around on the every-minute refresh (huashu: seed every random).
   const seed = str => { let h = 2166136261; for (const ch of str) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0) / 4294967296); };
   const W = () => yard.clientWidth, H = () => yard.clientHeight;
+  const inner = (c, i) => svg(c, i) + `<span class="tag">${c.name.length > 16 ? c.name.slice(0, 15) + "…" : c.name}</span>`
+    + `<span class="say">${c.name}: ${byCpu ? `${Math.round(c.cpu || 0)}% of the processors, ${gbTxt(c.gb)}` : gbTxt(c.gb)}</span>`;
   const mobs = crowd.map((c, i) => {
     const el = document.createElement("div"); el.className = "mini";
-    const w = 34 + 54 * Math.sqrt(c.gb / max); el.style.width = w + "px";
-    el.innerHTML = svg(c, i) + `<span class="tag">${c.name.length > 16 ? c.name.slice(0, 15) + "…" : c.name}</span><span class="say">${c.name}: ${c.gb >= 1 ? c.gb.toFixed(1) + " GB" : Math.round(c.gb * 1024) + " MB"}</span>`;
+    const w = 34 + 54 * Math.sqrt(size(c) / max); el.style.width = w + "px";
+    el.innerHTML = inner(c, i);
     el.title = c.name;
     yard.appendChild(el);
     const h = w * 92 / 60;
     const rnd = seed(c.name);
     const m = { el, w, h, rnd, v: 0, x: rnd() * (W() - w), y: 20 + rnd() * (H() - h - 40), tx: 0, ty: 0, wait: rnd() * 2000,
-      speed: (mood === "over" ? 70 : 32) * (1.4 - .6 * Math.sqrt(c.gb / max)) };
+      speed: (mood === "over" ? 70 : 32) * (1.4 - .6 * Math.sqrt(size(c) / max)) };
     el.addEventListener("click", () => { el.classList.add("talk"); m.wait = 2500; setTimeout(() => el.classList.remove("talk"), 2500); });
     return m;
   });
   const place = m => m.el.style.transform = `translate(${m.x}px,${m.y}px)`;
   mobs.forEach(m => { m.tx = m.x; m.ty = m.y; place(m); });
+  // Follow the page's Processors / Memory switch: resize every buddy and reword the heading.
+  const apply = ms => {
+    byCpu = ms === "cpu"; max = Math.max(...crowd.map(size), byCpu ? 1 : .1);
+    const [hd, more, , two] = WORDS[byCpu ? "cpu" : "mem"], wrap = yard.closest(".yard-wrap");
+    if (wrap) { wrap.querySelector(".yard-head b").textContent = hd; wrap.querySelector(".yard-key span:last-child").textContent = two;
+      wrap.querySelector(".yard-head span").textContent = `One buddy per app and per Claude Code session. Bigger buddy, ${more}. Click one to ask.`; }
+    mobs.forEach((m, i) => { const c = crowd[i], w = 34 + 54 * Math.sqrt(size(c) / max);
+      m.w = w; m.h = w * 92 / 60; m.el.style.width = w + "px"; m.el.innerHTML = inner(c, i);
+      m.speed = (mood === "over" ? 70 : 32) * (1.4 - .6 * Math.sqrt(size(c) / max));
+      m.x = Math.min(m.x, Math.max(W() - w, 0)); m.y = Math.min(m.y, Math.max(H() - m.h - 20, 0)); place(m); });
+  };
+  document.querySelectorAll(".mt").forEach(b => b.addEventListener("click", () => apply(b.dataset.m)));
+  try { const mm = localStorage.getItem("mm-measure"); if (mm && (mm === "cpu") !== byCpu) apply(mm); } catch (_) {}
   if (still) return;
   let last = performance.now();
   const tick = now => {
@@ -264,11 +287,13 @@ YARD_JS = """<script>
 })();
 </script>"""
 
-def theme(page, mood, crowd=()):
+def theme(page, mood, crowd=(), measure="mem"):
     import json
+    head, more, by, two = YARD_WORDS["cpu" if measure == "cpu" else "mem"]
     page = page.replace("</style>", YARD_CSS + "</style>", 1)
-    page = page.replace("<!--YARD-->", YARD, 1)
-    page = page.replace("</body>", YARD_JS.replace("__CROWD__", json.dumps(list(crowd)).replace("</", "<\\/")).replace("__MOOD__", mood) + "</body>", 1)
+    page = page.replace("<!--YARD-->", YARD.replace("__HEAD__", head).replace("__MORE__", more).replace("__BY__", by).replace("__TWO__", two), 1)
+    page = page.replace("</body>", YARD_JS.replace("__CROWD__", json.dumps(list(crowd)).replace("</", "<\\/")).replace("__MOOD__", mood)
+                        .replace("__MEASURE__", measure).replace("__WORDS__", json.dumps(YARD_WORDS)) + "</body>", 1)
     return _theme(page, mood)
 
 MAGIC_CSS = r"""

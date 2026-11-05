@@ -610,6 +610,7 @@ def render(v):
     # The processors view comes first wherever the processors held the Mac up more.
     m_first = "cpu" if cpu_first and capps else "mem"
     m_first_c = "cpu" if m_first == "cpu" and len(tjc) >= 60 else "mem"
+    v["yard_measure"] = m_first          # buddy.py sizes the yard's buddies by the same measure (memlog.py reads it back)
     def mtabs(panel, first):
         return ('<div class="jtabs mtabs" role=group aria-label="Measure">' + "".join(
             f'<button type=button class="jt mt" data-m={m} aria-pressed={"true" if m == first else "false"}>{n_}</button>'

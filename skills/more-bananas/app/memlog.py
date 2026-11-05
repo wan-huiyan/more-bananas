@@ -312,11 +312,13 @@ uptime_txt = f"{_h / 24:.1f} days since the last restart" if _h >= 48 else f"{_h
 from report import render  # noqa: E402
 from buddy import theme    # noqa: E402
 
-html_page = render(locals())
-crowd = [{"name": g, "gb": round(gb, 2), "kind": "app"} for g, gb in sorted(now_d.items(), key=lambda kv: -kv[1])
-         if g != "Claude Code sessions" and gb >= 0.1]
-crowd += [{"name": short(folders.get(p_, "unknown folder")), "gb": round(gb, 2), "kind": "claude"} for p_, gb in sess]
-html_page = theme(html_page, mood, crowd)
+ctx = locals()                     # at module level this is the module's own namespace; render() reads it and sets yard_measure
+html_page = render(ctx)
+# One buddy per app group and per Claude Code session, with its memory and its share of all the processors.
+crowd = [{"name": g, "gb": round(gb, 2), "cpu": round(cpu_by_group.get(g, 0), 1), "kind": "app"} for g, gb in sorted(now_d.items(), key=lambda kv: -kv[1])
+         if g != "Claude Code sessions" and (gb >= 0.1 or cpu_by_group.get(g, 0) >= 1)]
+crowd += [{"name": short(folders.get(p_, "unknown folder")), "gb": round(gb, 2), "cpu": round(pcpu.get(p_, 0) / ncores, 1), "kind": "claude"} for p_, gb in sess]
+html_page = theme(html_page, mood, crowd, ctx.get("yard_measure", "mem"))
 open(OUT + ".tmp", "w").write(html_page)
 os.replace(OUT + ".tmp", OUT)
 

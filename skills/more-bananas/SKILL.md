@@ -35,7 +35,8 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
    (from `~/.claude/projects` transcripts); below it minutes held up per day by cause (a day counts as held up
    after half an hour), then memory over the RAM size, per measured day.
 5. **Busy hours**: weekday by working-hour heatmap, opening on what held each hour up (switch to memory needed).
-6. **What uses the Mac**: a walking buddy per app and per Claude session, plus every app group's processor share and memory
+6. **What uses the Mac**: a walking buddy per app and per Claude session (sized by processor share or memory,
+   following the same switch), plus every app group's processor share and memory
    now / 24 h / 7 days / 30 days (average and busiest minute); Claude's tools and test browsers expand into
    groups and scripts.
 7. **What Claude runs**: Claude's tools and hidden test browsers by kind (test browsers, page checks, cloud tools,
