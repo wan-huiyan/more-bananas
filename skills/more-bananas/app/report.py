@@ -357,7 +357,7 @@ def render(v):
         f_ = fits(sz, work)
         tag = " &middot; this Mac" if sz == TOTAL else " &middot; recommended" if sz == rec else " &middot; budget pick" if sz == budget else ""
         nb = f'<i>without Claude&#x27;s test browsers: {fits(sz, work_nb):.0%}</i>' if work_nb else ""
-        ladder += (f'<div class="row lad{" me" if sz == rec else ""}" style="--i:{LADDER.index(sz)}"><span><b>{sz} GB</b>{tag}<br>{nb}</span>'
+        ladder += (f'<div class="row lad{" me" if sz == rec else ""}" data-sz="{sz}" style="--i:{LADDER.index(sz)}"><span><b>{sz} GB</b>{tag}<br>{nb}</span>'
                    f'<div class=track><b style="--w:{max(f_ * 100, 2):.0f}%"></b></div><em>{f_:.0%}</em></div>')
     cpu_rows = []
     cp_ = os.path.join(v["HOME"], "cpu.csv")
@@ -368,6 +368,10 @@ def render(v):
     cpu_txt = (f"processor: 95% of working minutes used under {cpu_p95:.0f}% of its {cpu_rows[-1][3]} cores, so memory is the limit, not the chip." if cpu_p95 is not None and cpu_p95 < 70 and len(cpu_work) >= 60 else
                f"processor: 95% of working minutes used under {cpu_p95:.0f}% of its {cpu_rows[-1][3]} cores." if cpu_p95 is not None and len(cpu_work) >= 60 else
                "processor: measured from today, too few readings to judge yet.")
+
+    lesson = lesson_html(TOTAL=TOTAL, work=work, wdays=wdays, work_nb=work_nb, fits=fits, LADDER=LADDER, peak_ever=peak_ever,
+                         peak_ever_when=peak_ever_when, target=target, rec=rec, budget=budget, fit16=fit16, disk_used=disk_used,
+                         disk_txt=disk_txt, n_wd=n_wd, WD_GOAL=WD_GOAL)
 
     # ---------- Busy hours: the takeaway ----------
     over_cells = sorted(((x, k) for k, x in wcell.items() if x > TOTAL), reverse=True)
@@ -427,7 +431,7 @@ def render(v):
     tabs = [("rec", "Recommendation"), ("today", "Today"), ("days", "Busy days"), ("hours", "Busy hours"), ("uses", "What uses memory"), ("claude", "What Claude runs"), ("how", "How this works")]
     tab_html = "".join(f'<button role=tab data-go="{k}" aria-controls="p-{k}">{t}</button>' for k, t in tabs)
 
-    return f"""<!doctype html><html lang=en><head><meta charset=utf-8><script>try{{if(sessionStorage.getItem("mm-again"))document.documentElement.classList.add("again")}}catch(_){{}}
+    return add_lesson(f"""<!doctype html><html lang=en><head><meta charset=utf-8><script>try{{if(sessionStorage.getItem("mm-again"))document.documentElement.classList.add("again")}}catch(_){{}}
 setTimeout(function(){{try{{sessionStorage.setItem("mm-again","1")}}catch(_){{}}location.reload()}},60000)</script>
 <style>html{{background:#fff7d6}}</style>
 <script>addEventListener("load",function(){{if(!document.documentElement.classList.contains("again"))return;
@@ -600,18 +604,18 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <section class=panel id=p-rec role=tabpanel><div class=inner>
 <section class=hero>
 <p class="kick en">My work has needed up to {peak_ever:.1f} GB of memory. This Mac has {TOTAL:.0f}.</p>
-<h1 class=en>{f"Get <em>{rec} GB</em> of memory<br>and {disk_txt} of storage." if rec > TOTAL else f"This Mac&#x27;s <em>{TOTAL:.0f} GB</em> is enough<br>for now."}</h1>
-<p class="lede en" style="--n:1">In the working minutes measured, {TOTAL:.0f} GB was enough only {fit16:.0%} of the time. {budget} GB would have covered 99%; {rec} GB covers the busiest minute with a quarter to spare, so a heavier week still fits.{"" if rec > TOTAL else " This Mac already has that."}</p>
+<h1 class=en id=rec-h1>{f"Get <em>{rec} GB</em> of memory<br>and {disk_txt} of storage." if rec > TOTAL else f"This Mac&#x27;s <em>{TOTAL:.0f} GB</em> is enough<br>for now."}</h1>
+{lesson}
 </section>
 <div class=two>
 <div class="c en" style="--n:2"><small>Share of working minutes each size would have handled</small><div class="list ladder">{ladder}</div>
-<p class=note style="margin-top:10px">{len(work):,} working minutes, 7am to midnight{f'; the small &ldquo;without&rdquo; figures take out the hidden test browsers Claude opens, and cover only minutes since {split_t}, when those were first measured apart' if work_nb else ''}.</p></div>
-<div class="c en" style="--n:3"><svg class=jars viewBox="0 -60 1000 440" role=img aria-label="A {TOTAL:.0f} GB jar holding the busiest minute's {peak_ever:.1f} GB, next to a {rec} GB jar holding it with room to spare">{jars}</svg></div>
+<p class=note id=rec-note style="margin-top:10px">{len(work):,} working minutes, 7am to midnight{f'; the small &ldquo;without&rdquo; figures take out the hidden test browsers Claude opens, and cover only minutes since {split_t}, when those were first measured apart' if work_nb else ''}.</p></div>
+<div class="c en" id=rec-jars style="--n:3"><svg class=jars viewBox="0 -60 1000 440" role=img aria-label="A {TOTAL:.0f} GB jar holding the busiest minute's {peak_ever:.1f} GB, next to a {rec} GB jar holding it with room to spare">{jars}</svg></div>
 </div>
 <div class=specs>
-<div class="c en" style="--n:4"><b>{rec} GB</b><span>memory, or {budget} GB if budget is tight: enough today, little room to grow.</span></div>
-<div class="c en" style="--n:5"><b>{disk_txt}</b><span>storage: {disk_used:.0f} GB of this Mac&#x27;s {disk_total:.0f} GB is in use, plus half again for growth.</span></div>
-<div class="c en" style="--n:6"><b>{n_wd} of {WD_GOAL}</b><span>working days measured so far. {e(cpu_txt[0].upper() + cpu_txt[1:])}</span></div>
+<div class="c en" id=rec-mem style="--n:4"><b>{rec} GB</b><span>memory, or {budget} GB if budget is tight: enough today, little room to grow.</span></div>
+<div class="c en" id=rec-disk style="--n:5"><b>{disk_txt}</b><span>storage: {disk_used:.0f} GB of this Mac&#x27;s {disk_total:.0f} GB is in use, plus half again for growth.</span></div>
+<div class="c en" id=rec-days style="--n:6"><b>{n_wd} of {WD_GOAL}</b><span>working days measured so far. {e(cpu_txt[0].upper() + cpu_txt[1:])}</span></div>
 </div>
 </div></section>
 
@@ -787,4 +791,162 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
   if (!still) setInterval(() => {{ if (hover < 0) {{ step = (step + Math.max(1, Math.round(n / 120))) % n; put(step); }} }}, 250);
 }})();
 let seen = false; try {{ seen = sessionStorage.getItem("mm-seen") === "1"; sessionStorage.setItem("mm-seen", "1"); }} catch (_) {{}}
-</script></body></html>"""
+</script></body></html>""")
+
+
+# ---------- Recommendation: the buddy teaches how it got to the answer ----------
+# Every number comes from the readings. Steps that do not apply to this Mac are left out.
+def lesson_html(*, TOTAL, work, wdays, work_nb, fits, LADDER, peak_ever, peak_ever_when, target, rec, budget, fit16,
+                disk_used, disk_txt, n_wd, WD_GOAL):
+    def row(sz):
+        return f".lad[data-sz='{sz}']" if sz in LADDER else ""
+    me = int(round(TOTAL))
+    nd = len(wdays)
+    steps = [("#rec-note", f"I watched <b>{len(work):,} working minutes</b>, 7am to midnight, over {nd} day{'s' if nd != 1 else ''}. "
+                           "Here is how I got from those to my answer.")]
+    if peak_ever > TOTAL:
+        steps.append(("#rec-jars", f"The busiest minute, {peak_ever_when}, needed <b>{peak_ever:.1f} GB</b>. "
+                                   f"This Mac has {TOTAL:.0f}, so {peak_ever - TOTAL:.1f} GB of it had to wait on the disk."))
+    else:
+        steps.append(("#rec-jars", f"The busiest minute, {peak_ever_when}, needed <b>{peak_ever:.1f} GB</b>. "
+                                   f"This Mac has {TOTAL:.0f}, so even that minute fitted."))
+    steps.append((row(me), f"{TOTAL:.0f} GB was enough in {'only ' if fit16 < .9 else ''}<b>{fit16:.0%} of those minutes</b>."
+                           + (" The rest of the time, part of what you had open sat on the disk." if fit16 < 1 else "")))
+    if work_nb:
+        nb = fits(me, work_nb)
+        if nb >= fit16 + .05:
+            steps.append((row(me), f"Without the hidden test browsers Claude opens, {TOTAL:.0f} GB would have been enough "
+                                   f"<b>{nb:.0%} of the time</b>. Closing those is free; more memory is not."))
+    if rec > TOTAL and budget != rec and budget > TOTAL:
+        steps.append((row(budget), f"<b>{budget} GB</b> would have covered 99% of minutes. That is the budget pick: "
+                                   "enough for today, with little room to grow."))
+    if rec > TOTAL:
+        steps.append((", ".join(x for x in (row(rec), "#rec-mem") if x),
+                      f"For my answer I take the busiest minute, {peak_ever:.1f} GB, and add a quarter for a heavier week: "
+                      f"{target:.1f} GB. The next size Macs come in is <b>{rec} GB</b>."))
+    else:
+        steps.append(("#rec-mem", f"For my answer I take the busiest minute, {peak_ever:.1f} GB, and add a quarter for a heavier week: "
+                                  f"{target:.1f} GB. This Mac already has <b>{TOTAL:.0f} GB</b>."))
+    steps.append(("#rec-disk", f"Storage: <b>{disk_used:.0f} GB</b> is in use now. Half again for growth makes "
+                               f"{disk_used * 1.5:.0f} GB, so <b>{disk_txt}</b>."))
+    steps.append(("#rec-days", f"I have measured {n_wd} of {WD_GOAL} working days so far. A busier week could change this, "
+                               "so keep me running."))
+    steps.append(("#rec-h1", f"So: <b>{rec} GB</b> of memory and <b>{disk_txt}</b> of storage." if rec > TOTAL else
+                             f"So: this Mac&#x27;s <b>{TOTAL:.0f} GB</b> is enough for now. Look again after a busy week."))
+    n = len(steps)
+    items = "".join(f'<li data-t="{t}"{" class=on" if k == 0 else ""}><span class=k>{k + 1} of {n}</span>{x}</li>'
+                    for k, (t, x) in enumerate(steps))
+    return (f'<div class="lesson en" id=lesson style="--n:1"><ol aria-label="How the buddy worked out the answer">{items}</ol>'
+            '<div class=ctl><button type=button class=lp aria-label="Previous step">&lsaquo;</button><span class=ld aria-hidden=true></span>'
+            '<button type=button class=lt aria-label="Pause the lesson"></button>'
+            '<button type=button class=ln aria-label="Next step">&rsaquo;</button></div></div>')
+
+
+LESSON_CSS = """
+/* the lesson: one speech bubble, one step at a time; all steps share one grid cell so the bubble never changes height */
+.lesson{position:relative;margin:10px 0 0;max-width:58rem;display:flex;gap:14px;align-items:center;padding:12px 14px 12px 18px;
+ border:2px solid var(--line);border-radius:6px 22px 22px 22px;background:var(--card);box-shadow:0 6px 18px rgba(29,42,68,.07)}
+.lesson:before{content:"";position:absolute;left:-12px;top:12px;border:10px solid transparent;border-right-color:var(--line);border-left:0}
+.lesson ol{list-style:none;margin:0;padding:0;display:grid;flex:1;min-width:0}
+.lesson li{grid-area:1/1;font-size:clamp(.98rem,1.45vw,1.08rem);line-height:1.45;color:var(--fg);opacity:0;visibility:hidden;
+ transform:translateY(5px);transition:opacity .16s ease-out,transform .16s ease-out,visibility 0s .16s}
+.lesson li.on{opacity:1;visibility:visible;transform:none;transition:opacity .24s ease-out .06s,transform .24s cubic-bezier(.2,.8,.2,1) .06s,visibility 0s}
+.lesson li b{font-weight:700;background:linear-gradient(transparent 60%,var(--fillA) 0)}
+.lesson .k{font:600 12px 'Geist Mono',monospace;color:var(--mute);margin-right:8px;white-space:nowrap}
+.lesson .ctl{display:flex;align-items:center;gap:6px;flex:none}
+.lesson button{width:30px;height:30px;border-radius:50%;border:2px solid var(--line);background:transparent;color:var(--fg);
+ font:700 15px/1 Geist,sans-serif;display:grid;place-items:center;padding:0}
+.lesson button:hover{border-color:var(--banana);background:var(--fillB)}
+.lesson .ld{display:flex;gap:4px;align-items:center;margin:0 2px}
+.lesson .ld i{width:7px;height:7px;border-radius:4px;background:var(--line);position:relative;overflow:hidden;transition:width .2s}
+.lesson .ld i.done{background:color-mix(in oklab,var(--fg) 45%,transparent)}
+.lesson .ld i.on{width:22px}
+.lesson .ld i.on:after{content:"";position:absolute;inset:0;background:var(--fg);transform-origin:left;transform:scaleX(var(--p,0))}
+.lesson-t{outline:3px solid transparent;outline-offset:5px;transition:outline-color .24s ease-out}
+.lesson-t.lit{outline-color:var(--banana)}
+#rec-h1.lesson-t{outline:0}
+#p-rec .row.lad.lesson-t{border-radius:12px}
+#p-rec .buddy svg{overflow:visible}
+#p-rec .buddy-wrap .arm-r,#p-rec .buddy-wrap .arm-l{animation:none!important}
+#p-rec .buddy-wrap[data-mood=over] .bob{animation:bob 2.6s ease-in-out infinite}
+#p-rec .stick{transform-box:view-box;transform-origin:178px 100px;transition:transform .36s cubic-bezier(.2,.8,.2,1)}
+#p-rec .buddy svg.nod{animation:nod .34s ease-out}
+@keyframes nod{40%{transform:translateY(4px)}}
+@media(prefers-reduced-motion:reduce){.lesson li,.lesson li.on,.lesson-t,#p-rec .stick,.lesson .ld i{transition:none}#p-rec .buddy svg.nod{animation:none}}
+@media(max-width:760px){.lesson{flex-direction:column;align-items:stretch;border-radius:22px;text-align:left}.lesson:before{display:none}.lesson .ctl{justify-content:center}}
+"""
+
+LESSON_JS = r"""<script>
+(() => {
+  const L = document.getElementById("lesson"); if (!L) return;
+  const P = document.getElementById("p-rec"), steps = [...L.querySelectorAll("li")], n = steps.length;
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const ld = L.querySelector(".ld"); ld.innerHTML = steps.map(() => "<i></i>").join(""); const dots = [...ld.children];
+  const bt = L.querySelector(".lt"), today = new Date().toISOString().slice(0, 10);
+  const tgts = k => { const sel = steps[k].dataset.t; return sel ? [...document.querySelectorAll(sel)] : []; };
+  steps.forEach((_, k) => tgts(k).forEach(el => el.classList.add("lesson-t")));
+  // The pointer stick sits in the buddy's raised hand and turns toward whatever the bubble is about.
+  const svg = document.querySelector("#p-rec .buddy svg"), bob = svg && svg.querySelector(".bob"), hand = svg && svg.querySelector(".arm-r circle");
+  let stick = null;
+  if (bob && hand) {
+    stick = document.createElementNS("http://www.w3.org/2000/svg", "g"); stick.setAttribute("class", "stick");
+    stick.innerHTML = '<rect x="174" y="97" width="100" height="6" rx="3" fill="#8b5a2b"/><rect x="264" y="95" width="16" height="10" rx="5" fill="#ffd93b" stroke="#c99700" stroke-width="1.5"/>';
+    bob.insertBefore(stick, bob.firstChild);
+  }
+  let i = 0, playing = true, t = 0, last = performance.now(), ang = null, wasOn = false;
+  // On a short screen the cards at the bottom sit below the fold: bring the one being explained into view.
+  const show = () => { const el = tgts(i)[0]; if (!el || !P.classList.contains("on") || matchMedia("(max-width: 760px)").matches) return; const how = calm ? "auto" : "smooth";
+    if (el.closest(".hero")) P.scrollTo({ top: 0, behavior: how }); else el.scrollIntoView({ block: "nearest", behavior: how }); };
+  try {
+    const s = JSON.parse(sessionStorage.getItem("mm-lesson") || "null");
+    if (s && s.n === n) { i = Math.min(s.i, n - 1); playing = s.playing; t = s.t || 0; }
+    else if (localStorage.getItem("mm-lesson-day") === today) { i = n - 1; playing = false; }
+  } catch (_) {}
+  const dur = k => Math.max(4500, Math.min(9500, 2400 + steps[k].textContent.length * 42));
+  const save = () => { try { sessionStorage.setItem("mm-lesson", JSON.stringify({ n, i, playing, t })); } catch (_) {} };
+  const label = () => {
+    const end = !playing && i === n - 1;
+    bt.innerHTML = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">' + (playing ? '<rect x="2" y="1.5" width="2.8" height="9" rx="1" fill="currentColor"/><rect x="7.2" y="1.5" width="2.8" height="9" rx="1" fill="currentColor"/>'
+      : end ? '<path d="M9.6 4.2A4.2 4.2 0 1 0 10.2 7" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/><path d="M10.4 1.4v3.4H7" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      : '<path d="M3.2 1.6l7 4.4-7 4.4z" fill="currentColor"/>') + '</svg>';
+    bt.setAttribute("aria-label", playing ? "Pause the lesson" : end ? "Replay the lesson" : "Play the lesson");
+  };
+  const aim = () => {
+    if (!stick) return; const el = tgts(i)[0]; if (!el) return;
+    const r = el.getBoundingClientRect(); if (!r.width) return;
+    const p = svg.createSVGPoint(); p.x = 178; p.y = 100; const h = p.matrixTransform(bob.getScreenCTM());
+    let a = Math.atan2(r.top + r.height / 2 - h.y, Math.max(r.left + Math.min(r.width / 2, 160), r.left + 10) - h.x) * 180 / Math.PI;
+    a = Math.max(22, Math.min(105, a));  // never across the headline
+    if (ang === null || Math.abs(a - ang) > .5) { ang = a; stick.style.transform = `rotate(${a.toFixed(1)}deg)`; }
+  };
+  const go = (k, keepT) => {
+    tgts(i).forEach(el => el.classList.remove("lit"));
+    i = Math.max(0, Math.min(n - 1, k)); if (!keepT) t = 0;
+    steps.forEach((s, j) => s.classList.toggle("on", j === i));
+    dots.forEach((d, j) => { d.classList.toggle("on", j === i); d.classList.toggle("done", j < i); d.style.setProperty("--p", 0); });
+    tgts(i).forEach(el => el.classList.add("lit"));
+    show();
+    if (svg && !calm) { svg.classList.remove("nod"); void svg.getBoundingClientRect(); svg.classList.add("nod"); }
+    aim(); label(); save();
+  };
+  const finish = () => { playing = false; try { localStorage.setItem("mm-lesson-day", today); } catch (_) {} label(); save(); };
+  L.querySelector(".lp").onclick = () => { playing = false; go(i - 1); };
+  L.querySelector(".ln").onclick = () => { playing = false; go(i + 1); };
+  bt.onclick = () => { if (playing) { playing = false; label(); save(); } else { playing = true; if (i === n - 1) go(0); else { label(); save(); } } };
+  go(i, true);
+  setInterval(() => {
+    const now = performance.now(), dt = now - last; last = now;
+    aim();
+    const on = P.classList.contains("on"); if (on && !wasOn) setTimeout(show, 450); wasOn = on;
+    if (!playing || !P.classList.contains("on") || document.hidden) return;
+    t += dt; const d = dur(i);
+    if (dots[i]) dots[i].style.setProperty("--p", Math.min(t / d, 1).toFixed(3));
+    if (t >= d) { if (i < n - 1) go(i + 1); else finish(); }
+    else if (Math.floor(t / 1000) !== Math.floor((t - dt) / 1000)) save();
+  }, 100);
+})();
+</script>"""
+
+
+def add_lesson(page):
+    return page.replace("</style>", LESSON_CSS + "</style>", 1).replace("</body>", LESSON_JS + "</body>", 1)

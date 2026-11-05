@@ -18,6 +18,8 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
    of working minutes (7am to midnight). Shows the share of working minutes each size would have handled,
    with and without the hidden test browsers Claude opens, how many working days are measured (goal 10),
    and processor load. Storage = current disk use × 1.5.
+   The buddy explains the answer step by step in a speech bubble, pointing at the row or card each step is
+   about (it plays once a day, then rests on the summary; pause, step and replay buttons).
 2. **Today**: today's minute-by-minute memory need against the RAM line, the minutes it was actively
    swapping, and what held memory at today's busiest minute.
 3. **Busy days**: one timeline since the history start: Claude Code sessions open at once above the line
