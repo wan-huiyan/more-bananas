@@ -1,5 +1,5 @@
 #!/bin/bash
-# Mac Memory Monitor installer. Re-running it upgrades the code and keeps your readings and settings.
+# more-bananas (Mac memory monitor) installer. Re-running it upgrades the code and keeps your readings and settings.
 #   ./install.sh [--dock] [--drive-backup] [--history-from YYYY-MM-DD]
 set -euo pipefail
 [ "$(uname)" = Darwin ] || { echo "macOS only."; exit 1; }

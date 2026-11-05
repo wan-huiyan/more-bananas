@@ -1,11 +1,11 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "wan-huiyan-mac-memory-monitor",
-  "description": "mac-memory-monitor: measure what your Mac really needs, then buy the right amount of RAM.",
+  "name": "wan-huiyan-more-bananas",
+  "description": "more-bananas: measure what your Mac really needs, then buy the right amount of RAM.",
   "owner": { "name": "Huiyan Wan" },
   "plugins": [
     {
-      "name": "mac-memory-monitor",
+      "name": "more-bananas",
       "source": "./",
       "description": "Always-on Mac memory monitor with a measured RAM recommendation and a cute self-updating page.",
       "version": "1.0.0"

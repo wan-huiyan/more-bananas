@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mac Memory Monitor: run once a minute (by launchd). Each run appends one reading to ~/memlog/*.csv
+"""more-bananas, a Mac memory monitor: run once a minute (by launchd). Each run appends one reading to ~/memlog/*.csv
 and rebuilds ~/memlog/memory-report.html (linked from the Desktop).
 
 Reads macOS memory figures (sysctl, vm_stat, ps); sends nothing anywhere. Settings: ~/memlog/config.json.

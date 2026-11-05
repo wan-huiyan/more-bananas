@@ -1,9 +1,9 @@
 ---
-name: mac-memory-monitor
-description: Install a cute, always-on memory monitor on a Mac that records RAM and swap every minute and builds a self-updating page arguing whether the laptop is big enough, with a measured RAM recommendation. Use when someone says their Mac is slow or runs out of memory, wants to know how much RAM they need, wants evidence for a laptop upgrade, or asks to install, update, configure or remove the "memory monitor" / "Too Small a Mac" page. macOS only.
+name: more-bananas
+description: Install a cute, always-on memory monitor on a Mac that records RAM and swap every minute and builds a self-updating page arguing whether the laptop is big enough, with a measured RAM recommendation. Use when someone says their Mac is slow or runs out of memory, wants to know how much RAM they need, wants evidence for a laptop upgrade, or asks to install, update, configure or remove "more-bananas", the "memory monitor" or the "Too Small a Mac" page. macOS only.
 ---
 
-# Mac Memory Monitor
+# more-bananas 🍌 (Mac memory monitor)
 
 A background job reads macOS memory figures once a minute and rebuilds a local page,
 `~/Desktop/memory-report.html`, with animated buddy mascots. The page makes one case, from

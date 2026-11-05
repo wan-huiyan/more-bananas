@@ -2,12 +2,12 @@
   <img src="docs/buddy.svg" width="140" alt="The banana buddy mascot"/>
 </p>
 
-<h1 align="center">mac-memory-monitor 🍌</h1>
+<h1 align="center">more-bananas 🍌</h1>
 <p align="center"><em>Is your Mac too small for your work? Measure it, minute by minute, then buy the right amount of RAM.</em></p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/wan-huiyan/mac-memory-monitor" alt="license"/></a>
-  <a href="https://github.com/wan-huiyan/mac-memory-monitor/commits"><img src="https://img.shields.io/github/last-commit/wan-huiyan/mac-memory-monitor" alt="last commit"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/wan-huiyan/more-bananas" alt="license"/></a>
+  <a href="https://github.com/wan-huiyan/more-bananas/commits"><img src="https://img.shields.io/github/last-commit/wan-huiyan/more-bananas" alt="last commit"/></a>
   <img src="https://img.shields.io/badge/macOS-only-lightgrey" alt="macOS only"/>
   <img src="https://img.shields.io/badge/python-3.9%2B-blue" alt="python 3.9+"/>
   <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Claude_Code-skill-orange" alt="Claude Code skill"/></a>
@@ -57,8 +57,8 @@ This measures instead. It reads macOS's own memory figures once a minute, keeps 
 **Without Claude Code** (any Mac with Python 3, which comes with the Xcode command line tools):
 
 ```bash
-git clone https://github.com/wan-huiyan/mac-memory-monitor
-cd mac-memory-monitor/skills/mac-memory-monitor
+git clone https://github.com/wan-huiyan/more-bananas
+cd more-bananas/skills/more-bananas
 ./install.sh --dock
 ```
 
@@ -67,11 +67,11 @@ The page opens in your browser and a **Memory Monitor** buddy appears in your Do
 **With Claude Code**, install it as a plugin and ask Claude to set it up:
 
 ```bash
-claude plugin marketplace add wan-huiyan/mac-memory-monitor
-claude plugin install mac-memory-monitor@wan-huiyan-mac-memory-monitor
+claude plugin marketplace add wan-huiyan/more-bananas
+claude plugin install more-bananas@wan-huiyan-more-bananas
 ```
 
-Then say: *"install the memory monitor"*.
+Then say: *"install more-bananas"* (or *"install the memory monitor"*).
 
 <details>
 <summary>Options and removal</summary>
@@ -108,7 +108,7 @@ Re-running `install.sh` upgrades the code and keeps your readings and settings. 
 `launchd` runs `memlog.py` once a minute. It reads macOS's memory figures, groups processes into apps (and Claude Code's child processes into the session that started them), appends a row to a few CSV files in `~/memlog/`, and rebuilds one self-contained HTML page. No server, no network, no dependencies beyond the Python that ships with the Xcode command line tools.
 
 ```
-skills/mac-memory-monitor/
+skills/more-bananas/
 ├── SKILL.md            what Claude reads when you ask it to install or explain the monitor
 ├── install.sh          sets up ~/memlog, the launchd job, the Desktop link and the Dock app
 ├── uninstall.sh
