@@ -16,8 +16,8 @@
 > **A tiny background job records what your Mac is really holding every minute (every app, every Claude Code session, and the hidden browsers and scripts those sessions start) and turns it into a cute, self-updating page that tells you how much memory your next laptop needs.**
 
 <p align="center">
-  <img src="docs/screens/rec.png" width="860" alt="The Recommendation tab: get 48 GB of memory and 1 TB of storage, with the share of working minutes each RAM size would have handled"/>
-  <br/><sub>The first tab is the answer. Here a 16 GB Mac handled only 26% of working minutes; 32 GB would have covered 99%, and 48 GB covers the busiest minute with a quarter to spare. Real readings from one work laptop, project names replaced.</sub>
+  <img src="docs/demo/tour.gif" width="860" alt="Four tabs of the page: the recommendation, today's memory chart, what uses memory, and what Claude runs over the last 24 hours"/>
+  <br/><sub>Four of the seven tabs: the recommendation, today minute by minute, what uses memory, and what Claude ran in the last 24 hours. The first tab is the answer: on this 16 GB work laptop, 16 GB was enough in only 35% of working minutes, 32 GB would have covered 99%, and 48 GB covers the busiest minute (33.9 GB) with a quarter to spare. Real readings, project names replaced.</sub>
 </p>
 
 ## Why it exists
@@ -30,7 +30,7 @@ This measures instead. It reads macOS's own memory figures once a minute, keeps 
 
 | | Feature | The specifics |
 |---|---|---|
-| 🎯 | **A measured recommendation** | Busiest minute ever recorded × 1.25, rounded up to a size Macs are sold in. Plus a budget pick (smallest size that covered 99% of working minutes) and storage (current use × 1.5). Updates itself every minute. |
+| 🎯 | **A measured recommendation, explained** | Busiest minute ever recorded × 1.25, rounded up to a size Macs are sold in, and the buddy walks you through how it got there, step by step. Plus a budget pick (smallest size that covered 99% of working minutes) and storage (current use × 1.5). Updates itself every minute. |
 | 📊 | **"Would it have fitted?" ladder** | For 16 / 24 / 32 / 36 / 48 / 64 GB: the share of your working minutes (7am to midnight) each size would have handled, with and without Claude's hidden test browsers. |
 | 📈 | **Today, minute by minute** | Memory needed against your RAM line, the striped overflow onto disk, and the minutes the Mac was actively moving memory to disk. Hover any minute. |
 | 📅 | **Busy days and busy hours** | One timeline since the history start: Claude Code sessions open at once above the line, memory over your RAM below it. Plus a weekday × hour heatmap. |
@@ -39,18 +39,44 @@ This measures instead. It reads macOS's own memory figures once a minute, keeps 
 | 🪶 | **Light** | One run takes about 0.35 s a minute and stores about 1 MB of readings a day. Nothing is sent anywhere. |
 | 🛟 | **Survives a dead laptop** | Optional copy of readings and page to Google Drive every 15 minutes. |
 
-<details>
-<summary><b>📸 See every tab</b></summary>
+## See it in action
 
-| Today | Busy days |
+<p align="center">
+  <img src="docs/demo/lesson.gif" width="860" alt="The buddy on the Recommendation tab holds a pointer and explains its answer one step at a time, while each step's chart row or card lights up"/>
+  <br/><sub><b>🧑‍🏫 The buddy shows its working.</b> On the Recommendation tab it explains the answer one step at a time, pointing at the row or card each step is about: how many minutes it watched, the busiest minute, how often your RAM was enough, the budget pick, the size it recommends and why, and storage. Every number comes from your own readings, and steps that don't apply to your Mac are left out. Pause, step back, or replay any time.</sub>
+</p>
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/demo/yard.gif" alt="Banana buddies walking around a yard, one per app and per Claude Code session, sized by memory"/>
+<br/><b>🧸 Who is in your RAM right now.</b> One buddy per app and per Claude Code session, refreshed every minute. Bigger buddy, more memory; two goggles means over 1 GB. Click one to ask what it is.
+</td>
+<td width="50%" valign="top">
+<img src="docs/demo/claude.gif" alt="Switching the What Claude runs list between now, 24 hours, 7 days and 30 days, then opening the test browsers group"/>
+<br/><b>🤖 What Claude runs.</b> Switch between now, 24 hours, 7 days and 30 days. Here the hidden test browsers peaked at 9.2 GB; open a group to see each script and the project that started it.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/demo/today.gif" alt="Moving the mouse along today's memory chart, with a tooltip showing memory needed and in RAM for each minute"/>
+<br/><b>📈 Every minute of today.</b> Hover anywhere to read that minute: memory needed, memory in RAM, and whether the Mac was swapping. This day needed 19.5 GB on a 16 GB Mac, with 23 minutes of swapping.
+</td>
+<td width="50%" valign="top" align="center">
+<img src="docs/demo/phone.png" width="260" alt="The Recommendation tab on a phone-sized screen"/>
+<br/><b>📱 Works on a phone too.</b> Open the page from Google Drive (with <code>--drive-backup</code>) and swipe through the tabs.
+</td>
+</tr>
+</table>
+
+### 📸 Every tab, and what it tells you
+
+| | |
 |---|---|
-| <img src="docs/screens/today.png" width="420"/> | <img src="docs/screens/days.png" width="420"/> |
-| **Busy hours** | **What uses memory** |
-| <img src="docs/screens/hours.png" width="420"/> | <img src="docs/screens/uses.png" width="420"/> |
-| **What Claude runs** | **How this works** |
-| <img src="docs/screens/claude.png" width="420"/> | <img src="docs/screens/how.png" width="420"/> |
-
-</details>
+| <img src="docs/screens/rec.png" width="420"/><br/>**🎯 Recommendation.** The RAM and storage to buy, how often each size would have been enough, and the buddy's step-by-step reasoning. | <img src="docs/screens/today.png" width="420"/><br/>**📈 Today.** Today minute by minute against your RAM line, and which apps held the busiest minute. |
+| <img src="docs/screens/days.png" width="420"/><br/>**📅 Busy days.** Claude Code sessions open at once (top) and memory over your RAM (bottom), day by day on one timeline. | <img src="docs/screens/hours.png" width="420"/><br/>**🕐 Busy hours.** Weekday × hour heatmap, 7am to midnight: which hours run out. Here, 13 of the 19 hours seen. |
+| <img src="docs/screens/uses.png" width="420"/><br/>**🧸 What uses memory.** The buddy yard, plus every app's memory now, over 24 hours, 7 days and 30 days. | <img src="docs/screens/claude.png" width="420"/><br/>**🤖 What Claude runs.** Claude's tools in plain groups: test browsers, page checks, cloud tools, plug-ins, build scripts, shell. |
+| <img src="docs/screens/how.png" width="420"/><br/>**🔍 How this works.** What each number means, where it comes from, and what it can't tell you. | |
 
 ## Quick start
 
