@@ -71,7 +71,7 @@ claude plugin marketplace add wan-huiyan/more-bananas
 claude plugin install more-bananas@wan-huiyan-more-bananas
 ```
 
-Then say: *"install more-bananas"* (or *"install the memory monitor"*).
+Then say: *"install more-bananas"*. Claude runs the installer with the Dock buddy and opens the page.
 
 <details>
 <summary>Options and removal</summary>
@@ -87,6 +87,24 @@ Then say: *"install more-bananas"* (or *"install the memory monitor"*).
 Re-running `install.sh` upgrades the code and keeps your readings and settings. Settings live in `~/memlog/config.json`.
 
 </details>
+
+## Where it lives on your Mac
+
+<p align="center">
+  <img src="docs/dock.png" width="420" alt="The banana buddy app in the macOS Dock, labelled Memory Monitor"/>
+  <br/><sub>Your entry point: click the buddy in the Dock and the page opens in your browser.</sub>
+</p>
+
+| What | Where |
+|---|---|
+| 🧸 **Dock buddy** (with `--dock`) | `~/Applications/Memory Monitor.app`, pinned to your Dock. Your Dock layout is saved to `~/memlog/dock-backup.plist` first. |
+| 📄 **The page** | `~/memlog/memory-report.html`, with a shortcut on your Desktop: `~/Desktop/memory-report.html`. Opens in any browser, works offline, and the tab shows the buddy too. |
+| 📊 **Your readings** | `~/memlog/*.csv`: memory, apps, swapping, Claude's tools, processor. Plain CSV, yours to keep. |
+| ⚙️ **Settings** | `~/memlog/config.json` |
+| ⏱️ **The background job** | `~/Library/LaunchAgents/com.memlog.monitor.plist`, run by macOS every 60 seconds, including after a restart. Errors go to `~/memlog/error.log`. |
+| ☁️ **Backup** (with `--drive-backup`) | `My Drive/Memory Monitor/` in Google Drive, every 15 minutes |
+
+`uninstall.sh` removes the Dock app, the Desktop shortcut and the background job; `--purge` also deletes `~/memlog`.
 
 ## Using it
 

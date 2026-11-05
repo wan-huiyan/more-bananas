@@ -48,8 +48,11 @@ Options (all optional, can be re-run any time; re-running upgrades the code and 
 
 Settings live in `~/memlog/config.json` and can be edited by hand.
 
-When helping someone install: run `./install.sh`, confirm the page opened, and tell them the first useful
-answer needs at least one normal busy working day of readings; the recommendation firms up as days accumulate.
+When helping someone install: run `./install.sh --dock`, confirm the page opened, and tell them where things
+live: the buddy in their Dock (`~/Applications/Memory Monitor.app`) opens the page; the page itself is
+`~/memlog/memory-report.html` with a Desktop shortcut; readings and settings are in `~/memlog/`. Also tell them
+the first useful answer needs at least one normal busy working day of readings; the recommendation firms up
+as days accumulate.
 
 ## Remove
 
