@@ -26,6 +26,8 @@ STRIPS = [
      "line_txt": "1 GB a minute: heavy", "words": ("fine", "busy", "heavy"), "mid": 300},
     {"k": "swap", "name": "Memory pushed to disk", "unit": "MB a minute", "lo": 0, "hi": None, "line": 100,
      "line_txt": "100 MB a minute: swapping hard", "words": ("calm", "a little", "swapping hard"), "mid": 5},
+    {"k": "net", "name": "Network in and out", "unit": "MB a minute", "lo": 0, "hi": None, "line": 500,
+     "line_txt": "500 MB a minute: heavy", "words": ("light", "busy", "heavy"), "mid": 100},
 ]
 HOT_TEMP, LOUD_FAN = 90, 60   # a minute counts as "ran hot" when the chip reached 90 °C or the fan passed 60%
 
@@ -66,6 +68,8 @@ def heat_section(home, today):
     for r in _rows(os.path.join(home, "io.csv"), 5):
         a, b = _num(r[1]), _num(r[2])
         by["disk"][r[0]] = (a or 0) + (b or 0) if a is not None or b is not None else None
+        c, d = _num(r[3]), _num(r[4])
+        by["net"][r[0]] = (c or 0) + (d or 0) if c is not None or d is not None else None
     for r in _rows(os.path.join(home, "live.csv"), 6):
         by["swap"][r[0]] = _num(r[1])
     apps = {}
@@ -131,7 +135,7 @@ def heat_section(home, today):
         ticks = "".join(f'<text class=htk x="{X(i):.1f}" y="{H + 20}" text-anchor="{"start" if i == 0 else "end" if i == n - 1 else "middle"}">{minute[i][11:] if minute[0][:10] == minute[-1][:10] else minute[i][5:10].replace("-", "/") + " " + minute[i][11:]}</text>'
                         for i in sorted({0, n - 1, *range(0, n, every)}) if i == n - 1 or n - 1 - i > n / (14 if wide else 6))
         return (f'<svg class="hstrips {"hwide" if wide else "hnarrow"}" data-w={W} viewBox="0 0 {W} {H + 30}" role=img '
-                f'aria-label="Chip temperature, fan speed, processor and graphics load, disk traffic and memory pushed to disk, minute by minute">'
+                f'aria-label="Chip temperature, fan speed, processor and graphics load, disk traffic, memory pushed to disk and network traffic, minute by minute">'
                 f'{"".join(clips)}{"".join(svg)}{ticks}<line class=hxh x1=0 x2=0 y1=0 y2={H} /></svg>')
 
     strips = draw(1000, 62, 40, 26, "w", True) + draw(420, 54, 34, 22, "n", False)
@@ -211,7 +215,7 @@ def heat_section(home, today):
 </div>
 <div class="c en" style="--n:4"><small>{e(who_title)}</small>{who}</div>
 </div>
-{f'<p class="note en" style="--n:5">Temperature, fan and graphics are measured from {e(first_heat)}{" today" if when == "Today" else ""}; processors and memory from earlier.</p>' if first_heat and series["temp"].index(next(x for x in series["temp"] if x is not None)) > 30 else ""}
+{f'<p class="note en" style="--n:5">Temperature, fan, graphics, disk and network are measured from {e(first_heat)}{" today" if when == "Today" else ""}; processors and memory from earlier.</p>' if first_heat and series["temp"].index(next(x for x in series["temp"] if x is not None)) > 30 else ""}
 <script type=application/json id=hdata>{json.dumps(data).replace("</", "<\\/")}</script>
 </div></section>
 """
@@ -219,9 +223,9 @@ def heat_section(home, today):
 
 HEAT_CSS = """
 /* Hot & slow tab */
-.htiles{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.htiles{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
 .ht{padding:10px 14px!important;border-radius:20px!important;display:flex;flex-direction:column;gap:2px;min-width:0}
-.ht .htn{font-size:12.5px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ht .htn{font-size:12.5px;line-height:1.3;color:var(--mute)}
 .ht b{font:700 26px/1.1 Fredoka,sans-serif;color:var(--fg);white-space:nowrap} .ht b small{display:inline;margin-left:3px;font:600 13px Geist,sans-serif;color:var(--mute)}
 .ht .hw{font-size:12.5px;color:var(--fg);display:flex;align-items:center;gap:6px}
 .ht .hw i{width:8px;height:8px;border-radius:50%;background:var(--good)}
@@ -241,8 +245,8 @@ HEAT_CSS = """
 #htip{transform:translate(-50%,8px);white-space:normal;width:max-content;max-width:360px}
 #htip .r{display:flex;justify-content:space-between;gap:14px} #htip .r span,#htip .r b{white-space:nowrap}
 #htip .r em{font:600 10.5px Geist,sans-serif;font-style:normal;text-transform:uppercase;letter-spacing:.04em;margin-left:6px;padding:1px 5px;border-radius:6px;background:var(--hot);color:#fff} #htip .ap{margin-top:5px;opacity:.85;font-size:12px}
-@media(max-width:1100px){.htiles{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(max-width:560px){.htiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:1250px){.htiles{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:560px){.htiles{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px} .ht{padding:8px 9px!important;border-radius:16px!important} .ht .htn,.ht .hw{font-size:11px} .ht b{font-size:19px} .ht b small{font-size:10.5px;margin-left:1px}}
 """
 
 HEAT_JS = """<script>
@@ -251,7 +255,7 @@ HEAT_JS = """<script>
   const box = document.getElementById("hchart"), dEl = document.getElementById("hdata");
   if (!box || !dEl) return;
   const D = JSON.parse(dEl.textContent), tip = document.getElementById("htip");
-  const lines = {temp: 90, fan: 60, cpu: 85, gpu: 85, disk: 1000, swap: 100};
+  const lines = {temp: 90, fan: 60, cpu: 85, gpu: 85, disk: 1000, swap: 100, net: 500};
   const fmt = (k, v) => v == null ? "–" : k === "temp" ? Math.round(v) + " °C" : D.units[k].startsWith("%") ? Math.round(v) + "%" : Math.round(v).toLocaleString() + " MB/min";
   const at = (svg, ev) => {
     const r = svg.getBoundingClientRect(), b = box.getBoundingClientRect(), Wd = +svg.dataset.w, xh = svg.querySelector(".hxh");

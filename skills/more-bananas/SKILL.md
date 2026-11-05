@@ -24,7 +24,7 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
 2. **Today**: today's minute-by-minute memory need against the RAM line, the minutes it was actively
    swapping, and what held memory at today's busiest minute.
 3. **Hot & slow**: everything that makes the Mac hot, loud or slow, minute by minute today: chip
-   temperature, fan speed, processors, graphics, disk traffic and memory pushed to disk, each with a
+   temperature, fan speed, processors, graphics, disk traffic, memory pushed to disk and network traffic, each with a
    dotted "too much" line and red above it; tiles for right now, and which apps kept the processors busy
    while it ran hot. Temperature and fan come from `heat`, a small Swift program install.sh builds.
 4. **Busy days**: one timeline since the history start: Claude Code sessions open at once above the line
