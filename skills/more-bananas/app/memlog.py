@@ -53,10 +53,12 @@ claude = chrome = 0.0
 terms, by_group, sessions = 0, {}, []
 grp = {}  # pid -> app group, reused below to split the processor load by app
 procs = {}
-for line in sh("ps", "-axo", "pid=,ppid=,rss=,command=").splitlines():
-    parts = line.strip().split(None, 3)
-    if len(parts) == 4:
-        procs[parts[0]] = parts[1:]
+pcpu = {}  # pid -> % of one core, for the processor share of each Claude tool
+for line in sh("ps", "-axo", "pid=,ppid=,rss=,%cpu=,command=").splitlines():
+    parts = line.strip().split(None, 4)
+    if len(parts) == 5:
+        procs[parts[0]] = [parts[1], parts[2], parts[4]]
+        pcpu[parts[0]] = float(parts[3]) if parts[3].replace(".", "", 1).isdigit() else 0.0
 AUTOMATION = ("--disable-field-trial-config", "--remote-debugging", "--headless", "--enable-automation")
 
 
@@ -83,6 +85,7 @@ for pid, (_ppid, rss, cmd) in procs.items():
 
 # What each Claude tool or Claude-driven browser is, and which session started it.
 TOOLS = os.path.join(HOME, "tools.csv")          # time, session folder, job, GB
+TOOLCPU = os.path.join(HOME, "tools_cpu.csv")    # time, session folder, job, % of all cores
 sess_pids = {p_ for p_, _ in sessions}
 
 
@@ -116,7 +119,7 @@ def owner(pid):  # the Claude Code session above this process, if any
         pid = procs[pid][0]
 
 
-jobs = {}
+jobs, jobs_cpu = {}, {}
 for pid, (_ppid, rss, cmd) in procs.items():
     g = next((name for name, test in GROUPS if test(cmd)), "")
     if g == "Chrome (incl. Meet)" and any(k in chrome_root(pid) for k in AUTOMATION):
@@ -130,6 +133,7 @@ for pid, (_ppid, rss, cmd) in procs.items():
         continue
     key = (owner(pid), name)
     jobs[key] = jobs.get(key, 0) + int(rss) / 2**20
+    jobs_cpu[key] = jobs_cpu.get(key, 0) + pcpu.get(pid, 0)
 
 # Which folder each Claude Code session works in, so its buddy can be named.
 folders = {}
@@ -160,6 +164,11 @@ with open(TOOLS, "a") as f:
     for (o, name), gb_ in jobs.items():
         if gb_ >= 0.02:
             f.write(f"{stamp},{short(folders.get(o, '')) if o else 'no Claude session'},{name.replace(',', ' ')},{gb_:.3f}\n")
+ncores = os.cpu_count() or 1
+with open(TOOLCPU, "a") as f:
+    for (o, name), pc in jobs_cpu.items():
+        if pc / ncores >= 0.2:
+            f.write(f"{stamp},{short(folders.get(o, '')) if o else 'no Claude session'},{name.replace(',', ' ')},{pc / ncores:.1f}\n")
 with open(LOG, "a") as f:
     f.write(f"{stamp},{used:.2f},{swap:.2f},{claude:.2f},{chrome:.2f},{terms}\n")
 
@@ -317,6 +326,6 @@ if cfg.get("drive_backup"):
     if drives and (int(time.strftime("%M")) % 15 == 0 or not os.path.isdir(os.path.join(drives[0], "Memory Monitor"))):
         dest = os.path.join(drives[0], "Memory Monitor")
         os.makedirs(dest, exist_ok=True)
-        for name in ("mem.csv", "apps.csv", "live.csv", "cpu.csv", "cpu_apps.csv", "heat.csv", "io.csv", "tools.csv", "history_sessions.csv", "memory-report.html", "config.json"):
+        for name in ("mem.csv", "apps.csv", "live.csv", "cpu.csv", "cpu_apps.csv", "tools_cpu.csv", "heat.csv", "io.csv", "tools.csv", "history_sessions.csv", "memory-report.html", "config.json"):
             if os.path.exists(os.path.join(HOME, name)):
                 shutil.copy2(os.path.join(HOME, name), dest)

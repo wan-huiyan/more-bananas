@@ -24,20 +24,23 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
    The buddy explains the answer step by step in a speech bubble while the page's own charts act out each
    step: bars regrow, the spill turns into red stripes, the jar is measured (it plays once a day, then rests
    on the summary; pause, step and replay buttons; a click or scroll anywhere puts the page back).
-2. **Today**: today's minute-by-minute memory need against the RAM line, the minutes it was actively
-   swapping, and what held memory at today's busiest minute.
+2. **Today**: two charts, the cause that held the Mac up more first: work waiting for the processors
+   against the core count (with who kept them busy), and memory need against the RAM line (the minutes it was
+   actively swapping, and what held memory at today's busiest minute).
 3. **Hot & slow**: everything that makes the Mac hot, loud or slow, minute by minute today: chip
    temperature, fan speed, processors, graphics, disk traffic, memory pushed to disk and network traffic, each with a
    dotted "too much" line and red above it; tiles for right now, and which apps kept the processors busy
    while it ran hot. Temperature and fan come from `heat`, a small Swift program install.sh builds.
 4. **Busy days**: one timeline since the history start: Claude Code sessions open at once above the line
-   (from `~/.claude/projects` transcripts), memory over the RAM size below it, per measured day.
-5. **Busy hours**: weekday by working-hour heatmap of the highest memory needed.
-6. **What uses memory**: a walking buddy per app and per Claude session, plus every app group's memory
+   (from `~/.claude/projects` transcripts); below it minutes held up per day by cause (a day counts as held up
+   after half an hour), then memory over the RAM size, per measured day.
+5. **Busy hours**: weekday by working-hour heatmap, opening on what held each hour up (switch to memory needed).
+6. **What uses the Mac**: a walking buddy per app and per Claude session, plus every app group's processor share and memory
    now / 24 h / 7 days / 30 days (average and busiest minute); Claude's tools and test browsers expand into
    groups and scripts.
 7. **What Claude runs**: Claude's tools and hidden test browsers by kind (test browsers, page checks, cloud tools,
-   plug-ins, build scripts, shell), now / 24 h / 7 days / 30 days, each opening into its scripts and session.
+   plug-ins, build scripts, shell), now / 24 h / 7 days / 30 days, each opening into its scripts and session,
+   by processor share (`tools_cpu.csv`) or memory. Tabs 6 and 7 open on whichever held the Mac up more.
 8. **How this works**: what is measured, how the recommendation is worked out, and the caveats.
 
 ## Install

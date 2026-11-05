@@ -9,7 +9,7 @@ import html
 import json
 import os
 
-from hotpanel import CAUSE_NAMES, add_heat, heat_section, minute_causes
+from hotpanel import CAUSE_NAMES, _span as span, add_heat, heat_section, minute_causes
 
 
 def gb(x):
@@ -110,6 +110,20 @@ def render(v):
     cause, cpu_from = minute_causes(v["HOME"])
     def held(c_):
         return CAUSE_NAMES[c_]
+    # Which held it up more over working hours since the processors were first measured. Every tab leads with it.
+    wc = [c_ for t, c_ in cause.items() if cpu_from and t >= cpu_from and 7 <= int(t[11:13]) < 24]
+    vn, vc = len(wc), {k_: wc.count(k_) for k_ in ("cpu", "both", "mem", "heat")}
+    cpu_first = vn >= 60 and vc["cpu"] > vc["mem"]
+    def rows_(name, ncol):
+        p_ = os.path.join(v["HOME"], name)
+        return [l.rstrip("\n").split(",") for l in open(p_) if l.count(",") == ncol - 1] if os.path.exists(p_) else []
+    wait_by_t = {r[0]: float(r[2]) / float(r[3]) for r in rows_("cpu.csv", 4) if float(r[3]) > 0}   # work waiting, x its cores
+    capps = {}                                   # minute -> {app group: % of all cores}
+    for r in rows_("cpu_apps.csv", 3):
+        capps.setdefault(r[0], {})[r[1]] = float(r[2])
+    tjc = {}                                     # minute -> {(session folder, job): % of all cores}
+    for r in rows_("tools_cpu.csv", 4):
+        tjc.setdefault(r[0], {})[(r[1], r[2])] = float(r[3])
     peak_when = dt.datetime.strptime(T[pk], "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M")
     swap_when = dt.datetime.strptime(LT[lpk], "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M")
 
@@ -153,6 +167,46 @@ def render(v):
     cpu_i = next((i for i, t in enumerate(T) if cpu_from and t >= cpu_from), None)
     band_note = ("processors not measured yet" if cpu_i is None else
                  f"processors measured from {T[cpu_i][11:]}" if cpu_i > 30 else "")
+    # The processors chart: work waiting per minute (load average over cores); above 1x there is more work than cores.
+    wv = [wait_by_t.get(t) for t in T]
+    has_w = any(x is not None for x in wv)
+    CH_ = 190
+    ctop = max(min(max([x for x in wv if x is not None], default=1) * 1.1, 4), 1.5)
+    def CY(x): return 10 + CH_ - min(x, ctop) * CH_ / ctop
+    cruns, cur_, last_ = [], [], -9
+    for i, x in enumerate(wv):
+        if x is None:
+            continue
+        if i - last_ > 3 and cur_:
+            cruns.append(cur_); cur_ = []
+        cur_.append((i, x)); last_ = i
+    if cur_:
+        cruns.append(cur_)
+    cpoly = ""
+    for run in cruns:
+        pts_ = " ".join(f"{X(i):.1f},{CY(x):.1f}" for i, x in run)
+        ar_ = f"{X(run[0][0]):.1f},{10 + CH_} {pts_} {X(run[-1][0]):.1f},{10 + CH_}"
+        cpoly += (f'<polygon class=wa points="{ar_}"/><polygon class=wah points="{ar_}" clip-path="url(#wabove)"/>'
+                  f'<polyline class=wl points="{pts_}"/><polyline class=wlh points="{pts_}" clip-path="url(#wabove)"/>')
+    cores_n = int(v.get("cores") or 0)
+    today_t = {t for t in T if t[:10] == T[-1][:10]}   # a set: a reinstall can log a minute twice
+    cpu_today = sum(1 for t in today_t if cause.get(t) in ("cpu", "both"))
+    worst_w = max(((x, i) for i, x in enumerate(wv) if x is not None), default=(None, None))
+    csh = {}
+    for t in T:
+        for g_, x in capps.get(t, {}).items():
+            csh[g_] = csh.get(g_, 0) + x
+    ctot = sum(csh.values())
+    if ctot:
+        csc = max(csh.values())
+        cwho = "".join(f'<div class=row style="--i:{j}" title="{e(g_)}"><span>{e(g_)}</span><div class=track><b style="--w:{x / csc * 100:.0f}%"></b></div><em>{x / ctot * 100:.0f}%</em></div>'
+                       for j, (g_, x) in enumerate(sorted(csh.items(), key=lambda kv: -kv[1])[:9]) if x / ctot >= .005)
+        cwho += f'<p class=note style="margin-top:8px">Share of all the processor time used, from {e(min(t for t in T if t in capps)[11:])}.</p>'
+    else:
+        cwho = '<p class=note>The per-app processor log starts with the next reading.</p>'
+    cdata = json.dumps({"t": T, "w": [None if x is None else round(x, 2) for x in wv],
+                        "apps": {str(i): sorted(capps[t].items(), key=lambda kv: -kv[1])[:3] for i, t in enumerate(T) if t in capps},
+                        "top": ctop, "ch": CH_, "cores": cores_n}).replace("</", "<\\/")
     series = json.dumps({"t": T, "need": [round(x, 2) for x in need], "ram": [round(x, 2) for x in U],
                          "swap": [round(swap_by_t.get(t, 0)) for t in T], "cause": tc, "cn": CAUSE_NAMES})
 
@@ -198,7 +252,8 @@ def render(v):
     for t, c_ in cause.items():
         if c_:
             dc_ = dcause.setdefault(t[:10], {}); dc_[c_] = dc_.get(c_, 0) + 1
-    CY0, CHh = HH + OH + 64, OH * .8
+    CY0, CHh = HH + 34, OH * .8           # the held-up row sits right under the line; memory over RAM comes below it
+    M0 = CY0 + CHh + 34
     cmax = max([sum(dcause.get(d, {}).values()) for d in days] + [30])
     cbars = []
     for i, d in enumerate(days):
@@ -216,6 +271,11 @@ def render(v):
         cbars.append(f'<g class=ob style="--i:{i}">{segs}<title>{dt.date.fromisoformat(d).strftime("%a %-d %b")}: held up for '
                      + ", ".join(f"{dc_[k_]} min by {held(k_)}" for k_ in ("cpu", "both", "mem", "heat") if dc_.get(k_)) + f"{unmeas}</title></g>")
     meas = [d for d in days if d in dmem]
+    dheld = {d: sum(dcause.get(d, {}).values()) for d in meas}
+    held_days = [d for d in meas if dheld[d] >= 30]       # a day counts as held up after half an hour of it
+    def dom_(d):
+        dc_ = dcause.get(d, {})
+        return max(dc_, key=dc_.get) if dc_ else ""
     over_days = sum(1 for d in meas if dmem[d][0] > TOTAL)
     worst_d = max(meas, key=lambda d: dmem[d][0]) if meas else None
     ten_y = HH - 10 * r * 2.15 + r
@@ -304,44 +364,51 @@ def render(v):
                 f'<li><span><b>{e(jb)}</b> <i>{e(se)}</i></span><em>{g_:.1f} GB</em></li>' for g_, jb, se in items[:5]) + "</ul>"
         return h_
 
-    last_t = max(tj) if tj else stamp_now
-    last_dt = dt.datetime.strptime(last_t, "%Y-%m-%d %H:%M")
-    views, take_k = [], None
-    for vid, vname, hours in (("now", "Now", 0), ("d1", "24 hours", 24), ("d7", "7 days", 168), ("d30", "30 days", 720)):
-        cut = (last_dt - dt.timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
-        mins_ = [t_ for t_ in tj if (t_ == last_t if hours == 0 else t_ > cut)]
-        ks, peak_k, per_min = {}, {}, {}
-        for t_ in mins_:
-            for (se, jb), g_ in tj[t_].items():
-                k_ = kind(jb)
-                ks.setdefault(k_, {}).setdefault((se, label(jb)), 0)
-                ks[k_][(se, label(jb))] += g_ / len(mins_)  # average over the window's minutes (now: this minute)
-                per_min[(t_, k_)] = per_min.get((t_, k_), 0) + g_
-        for (t_, k_), g_ in per_min.items():
-            peak_k[k_] = max(peak_k.get(k_, 0), g_)
-        tot = {k_: sum(v.values()) for k_, v in ks.items()}
-        if hours == 168 and peak_k:
-            take_k = max(peak_k.items(), key=lambda kv: kv[1])
-        if not tot:
-            body = '<p class=note>Nothing from Claude in this window.</p>'
-        else:
-            sc = max(tot.values())
-            desc = dict(KINDS)
-            body = '<p class=uh><span>Group</span><span>' + ("memory now" if hours == 0 else "average &middot; busiest minute, GB") + '</span></p>'
-            for j, (k_, x) in enumerate(sorted(tot.items(), key=lambda kv: -kv[1])):
-                topj = sorted(ks[k_].items(), key=lambda kv: -kv[1])[:6]
-                inner = "".join(f'<li><span><b>{e(jb)}</b> <i>{e(se)}</i></span><em>{g_:.1f} GB</em></li>' for (se, jb), g_ in topj)
-                more = len(ks[k_]) - len(topj)
-                val = f"{x:.1f} GB" if hours == 0 else f"{x:.1f} &middot; {peak_k.get(k_, 0):.1f}"
-                body += (f'<details class=kind style="--i:{j}"><summary><div class="row jr"><span><b>{e(k_)}</b><br><i>{len(ks[k_])} job{"s" if len(ks[k_]) != 1 else ""}</i></span>'
-                         f'<div class=track><b style="--w:{x/sc*100:.0f}%"></b></div><em>{val}</em></div></summary>'
-                         f'<p class=kd>{e(desc[k_])}</p><ul class=jl>{inner}</ul>{f"<p class=kd>+{more} smaller</p>" if more > 0 else ""}</details>')
-        views.append((vid, vname, hours, body))
-    have_h = (last_dt - dt.datetime.strptime(tfirst, "%Y-%m-%d %H:%M")).total_seconds() / 3600 if tfirst else 0
-    jobs_tabs = "".join(f'<button type=button class=jt data-v={vid} aria-pressed={"true" if j == 0 else "false"}>{vn}</button>' for j, (vid, vn, _, _) in enumerate(views))
-    jobs_views = "".join(f'<div class=jv data-v={vid}{"" if j == 0 else " hidden"}>'
+    def claude_views(src, cpu):
+        fmt = (lambda x: f"{x:.0f}%") if cpu else (lambda x: f"{x:.1f} GB")
+        last_t = max(src) if src else stamp_now
+        last_dt = dt.datetime.strptime(last_t, "%Y-%m-%d %H:%M")
+        views, take_k = [], None
+        for vid, vname, hours in (("now", "Now", 0), ("d1", "24 hours", 24), ("d7", "7 days", 168), ("d30", "30 days", 720)):
+            cut_ = (last_dt - dt.timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
+            mins_ = [t_ for t_ in src if (t_ == last_t if hours == 0 else t_ > cut_)]
+            ks, peak_k, per_min = {}, {}, {}
+            for t_ in mins_:
+                for (se, jb), g_ in src[t_].items():
+                    k_ = kind(jb)
+                    ks.setdefault(k_, {}).setdefault((se, label(jb)), 0)
+                    ks[k_][(se, label(jb))] += g_ / len(mins_)  # average over the window's minutes (now: this minute)
+                    per_min[(t_, k_)] = per_min.get((t_, k_), 0) + g_
+            for (t_, k_), g_ in per_min.items():
+                peak_k[k_] = max(peak_k.get(k_, 0), g_)
+            tot = {k_: sum(v_.values()) for k_, v_ in ks.items()}
+            if hours == 168 and peak_k:
+                take_k = max(peak_k.items(), key=lambda kv: kv[1])
+            if not tot:
+                body = '<p class=note>' + ("Processor use per tool is recorded from the next reading on." if cpu and not src else "Nothing from Claude in this window.") + '</p>'
+            else:
+                sc = max(tot.values())
+                desc = dict(KINDS)
+                body = '<p class=uh><span>Group</span><span>' + (("share of all cores now" if cpu else "memory now") if hours == 0 else
+                                                                  ("average &middot; busiest minute, % of all cores" if cpu else "average &middot; busiest minute, GB")) + '</span></p>'
+                for j_, (k_, x) in enumerate(sorted(tot.items(), key=lambda kv: -kv[1])):
+                    topj = sorted(ks[k_].items(), key=lambda kv: -kv[1])[:6]
+                    inner = "".join(f'<li><span><b>{e(jb)}</b> <i>{e(se)}</i></span><em>{fmt(g_)}</em></li>' for (se, jb), g_ in topj)
+                    more = len(ks[k_]) - len(topj)
+                    val = fmt(x) if hours == 0 else (f"{x:.0f} &middot; {peak_k.get(k_, 0):.0f}" if cpu else f"{x:.1f} &middot; {peak_k.get(k_, 0):.1f}")
+                    body += (f'<details class=kind style="--i:{j_}"><summary><div class="row jr"><span><b>{e(k_)}</b><br><i>{len(ks[k_])} job{"s" if len(ks[k_]) != 1 else ""}</i></span>'
+                             f'<div class=track><b style="--w:{x/sc*100:.0f}%"></b></div><em>{val}</em></div></summary>'
+                             f'<p class=kd>{e(desc[k_])}</p><ul class=jl>{inner}</ul>{f"<p class=kd>+{more} smaller</p>" if more > 0 else ""}</details>')
+            views.append((vid, vname, hours, body))
+        first_t = min(src) if src else None
+        have_h = (last_dt - dt.datetime.strptime(first_t, "%Y-%m-%d %H:%M")).total_seconds() / 3600 if first_t else 0
+        tabs_ = "".join(f'<button type=button class=jt data-v={vid} aria-pressed={"true" if j_ == 0 else "false"}>{vn}</button>' for j_, (vid, vn, _, _) in enumerate(views))
+        views_ = "".join(f'<div class=jv data-v={vid}{"" if j_ == 0 else " hidden"}>'
                          + ("" if h == 0 or have_h >= h else f'<p class=kd>Only {have_h:.0f} hours recorded so far, so this covers less than {vn}.</p>')
-                         + f'<div class=list>{b_}</div></div>' for j, (vid, vn, h, b_) in enumerate(views))
+                         + f'<div class=list>{b_}</div></div>' for j_, (vid, vn, h, b_) in enumerate(views))
+        return tabs_, views_, take_k
+    jobs_tabs, jobs_views, take_k = claude_views(tj, False)
+    cjobs_tabs, cjobs_views, take_kc = claude_views(tjc, True)
 
     # ---------- panel 6: memory jars ----------
     def jar(cx, cap, fill_gb, label, sub, spill):
@@ -412,6 +479,8 @@ def render(v):
                        f'<title>{names[wd]} {h:02d}:00: held up {share:.0%} of {cc["n"]} minutes, mostly by {held(dom)} ('
                        + ", ".join(f"{held(k_)} {cc[k_]}" for k_ in hk) + ')</title></rect>')
     heat_svg = "".join(hm) + f'<g class=hmc>{"".join(hc2)}</g>'
+    seen_hours = sum(1 for (_, h) in cell if h in HRS)   # the same hours the memory view counts, so the switch keeps one total
+    held_hours = sum(1 for k_, cc in ccell.items() if k_[1] in HRS and k_ in cell and sum(cc.get(x_, 0) for x_ in ("cpu", "both", "mem", "heat")) >= .1 * cc["n"])
     heat_w, heat_h = LX + len(HRS)*CW + 4, TY + 7*CH + 6
     filled = sum(1 for (_, h) in cell if h in HRS)
 
@@ -459,9 +528,6 @@ def render(v):
         cl_rows += (f'<div class="row cad{" me" if c == chip and chip_up else ""}" data-c="{c}" style="--i:{k_}"><span><b>{c} cores</b>{tag}</span>'
                     f'<div class=track><b style="--w:{max(f_ * 100, 2):.0f}%"></b></div><em>{f_:.0%}</em></div>')
     # The verdict: working minutes since the processors were first measured, by what held them up.
-    wc = [c_ for t, c_ in cause.items() if cpu_from and t >= cpu_from and 7 <= int(t[11:13]) < 24]
-    vn, vc = len(wc), {k_: wc.count(k_) for k_ in ("cpu", "both", "mem", "heat")}
-    cpu_first = vc["cpu"] > vc["mem"]
     if vn >= 60:
         seg = "".join(f'<i class="cz {k_}" style="width:{vc[k_] / vn * 100:.2f}%" title="{held(k_)}: {vc[k_]} minutes"></i>' for k_ in vc if vc[k_])
         key = "".join(f'<span><i class="cz {k_}"></i>{held(k_)} <b>{vc[k_]:,} min</b> ({vc[k_] / vn:.0%})</span>' for k_ in vc)
@@ -489,59 +555,73 @@ def render(v):
 
     # ---------- What uses memory: app groups over a time window, Claude's work opened up ----------
     a_last = max(apps_all) if apps_all else ""
-    def uses_view(hours):
-        if not a_last:
-            return '<p class=note>No readings yet.</p>', 0
+    def uses_view(hours, src, tsrc, cpu):
+        fmt = (lambda x: f"{x:.0f}%") if cpu else (lambda x: f"{x:.1f} GB")
+        last = max(src) if src else ""
+        if not last:
+            return '<p class=note>' + ("The per-app processor log starts with the next reading." if cpu else "No readings yet.") + '</p>', 0
         if hours == 0:
-            mins = [a_last]
+            mins = [last]
         else:
-            cut = (dt.datetime.strptime(a_last, "%Y-%m-%d %H:%M") - dt.timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
-            mins = [t for t in apps_all if t > cut]
+            cut_ = (dt.datetime.strptime(last, "%Y-%m-%d %H:%M") - dt.timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
+            mins = [t for t in src if t > cut_]
         tot, top_ = {}, {}
         for t in mins:
-            for g, x in apps_all[t].items():
+            for g, x in src[t].items():
                 tot[g] = tot.get(g, 0) + x; top_[g] = max(top_.get(g, 0), x)
         avg = {g: x / len(mins) for g, x in tot.items()}
-        tmins = [t for t in mins if t in tj]
+        tmins = [t for t in mins if t in tsrc]
         sc = max(avg.values()) if avg else 1
         desc = dict(KINDS)
         out = ""
         for j, (g, x) in enumerate(sorted(avg.items(), key=lambda kv: -kv[1])):
-            if x < .05:
+            if x < (.5 if cpu else .05):
                 continue
-            val = f"{x:.1f} GB" if hours == 0 else f"{x:.1f} &middot; {top_[g]:.1f}"
+            val = fmt(x) if hours == 0 else (f"{x:.0f} &middot; {top_[g]:.0f}" if cpu else f"{x:.1f} &middot; {top_[g]:.1f}")
             row = f'<div class="row ur" style="--i:{j}" title="{e(g)}"><span>{e(g)}</span><div class=track><b style="--w:{x/sc*100:.0f}%"></b></div><em>{val}</em></div>'
             sub = ""
             if g in ("Tools Claude starts", BR) and tmins:
                 ks = {}
                 for t in tmins:
-                    for (se, jb), g_ in tj[t].items():
+                    for (se, jb), g_ in tsrc[t].items():
                         k_ = kind(jb)
                         if (k_ == KINDS[0][0]) != (g == BR):
                             continue
                         ks.setdefault(k_, {}); ks[k_][(se, label(jb))] = ks[k_].get((se, label(jb)), 0) + g_ / len(tmins)
                 for k_, jobs_ in sorted(ks.items(), key=lambda kv: -sum(kv[1].values())):
                     topj = sorted(jobs_.items(), key=lambda kv: -kv[1])[:5]
-                    sub += (f'<p class=kd><b>{e(k_)}</b> &middot; {sum(jobs_.values()):.1f} GB{"" if hours == 0 else " on average"}. {e(desc[k_])}</p><ul class=jl>'
-                            + "".join(f'<li><span><b>{e(jb_)}</b> <i>{e(se)}</i></span><em>{g_:.1f} GB</em></li>' for (se, jb_), g_ in topj) + "</ul>")
+                    sub += (f'<p class=kd><b>{e(k_)}</b> &middot; {fmt(sum(jobs_.values()))}{"" if hours == 0 else " on average"}. {e(desc[k_])}</p><ul class=jl>'
+                            + "".join(f'<li><span><b>{e(jb_)}</b> <i>{e(se)}</i></span><em>{fmt(g_)}</em></li>' for (se, jb_), g_ in topj) + "</ul>")
             out += f'<details class=kind><summary>{row}</summary>{sub}</details>' if sub else row
         return out, len(mins)
-    uviews = []
-    for vid, vname, hours in (("now", "Now", 0), ("d1", "24 hours", 24), ("d7", "7 days", 168), ("d30", "30 days", 720)):
-        body, nmin = uses_view(hours)
-        short_ = "" if hours == 0 or nmin >= hours * 60 * .9 else f'<p class=kd>Only {nmin / 60:.0f} hours recorded in this window so far.</p>'
-        head_ = '<p class=uh><span>App</span><span>' + ("memory now" if hours == 0 else "average &middot; busiest minute, GB") + '</span></p>'
-        uviews.append((vid, vname, short_ + head_ + body))
-    uses_tabs = "".join(f'<button type=button class=jt data-v={vid} aria-pressed={"true" if j == 0 else "false"}>{vn}</button>' for j, (vid, vn, _) in enumerate(uviews))
-    uses_views = "".join(f'<div class=jv data-v={vid}{"" if j == 0 else " hidden"}><div class=list>{b_}</div></div>' for j, (vid, _, b_) in enumerate(uviews))
+    def uses_block(src, tsrc, cpu):
+        uviews = []
+        for vid, vname, hours in (("now", "Now", 0), ("d1", "24 hours", 24), ("d7", "7 days", 168), ("d30", "30 days", 720)):
+            body, nmin = uses_view(hours, src, tsrc, cpu)
+            short_ = "" if hours == 0 or nmin >= hours * 60 * .9 else f'<p class=kd>Only {nmin / 60:.0f} hours recorded in this window so far.</p>'
+            head_ = '<p class=uh><span>App</span><span>' + (("share of all cores now" if cpu else "memory now") if hours == 0 else
+                                                           ("average &middot; busiest minute, % of all cores" if cpu else "average &middot; busiest minute, GB")) + '</span></p>'
+            uviews.append((vid, vname, short_ + head_ + body))
+        tabs_ = "".join(f'<button type=button class=jt data-v={vid} aria-pressed={"true" if j == 0 else "false"}>{vn}</button>' for j, (vid, vn, _) in enumerate(uviews))
+        views_ = "".join(f'<div class=jv data-v={vid}{"" if j == 0 else " hidden"}><div class=list>{b_}</div></div>' for j, (vid, _, b_) in enumerate(uviews))
+        return tabs_, views_
+    uses_tabs, uses_views = uses_block(apps_all, tj, False)
+    cuses_tabs, cuses_views = uses_block(capps, tjc, True)
+    # The processors view comes first wherever the processors held the Mac up more.
+    m_first = "cpu" if cpu_first and capps else "mem"
+    m_first_c = "cpu" if m_first == "cpu" and len(tjc) >= 60 else "mem"
+    def mtabs(panel, first):
+        return ('<div class="jtabs mtabs" role=group aria-label="Measure">' + "".join(
+            f'<button type=button class="jt mt" data-m={m} aria-pressed={"true" if m == first else "false"}>{n_}</button>'
+            for m, n_ in (("cpu", "Processors"), ("mem", "Memory")) if m == "mem" or capps) + '</div>')
     d7_cut = (dt.datetime.strptime(a_last, "%Y-%m-%d %H:%M") - dt.timedelta(days=7)).strftime("%Y-%m-%d %H:%M") if a_last else ""
     br_peak = max((d_.get(BR, 0) for t, d_ in apps_all.items() if t > d7_cut), default=0)
 
     heat_sec = heat_section(v["HOME"], T[-1][:10])   # the Hot & slow tab; empty (and no tab) before any reading
-    tabs = [("rec", "Recommendation"), ("today", "Today")] + ([("heat", "Hot & slow")] if heat_sec else []) + [("days", "Busy days"), ("hours", "Busy hours"), ("uses", "What uses memory"), ("claude", "What Claude runs"), ("how", "How this works")]
+    tabs = [("rec", "Recommendation"), ("today", "Today")] + ([("heat", "Hot & slow")] if heat_sec else []) + [("days", "Busy days"), ("hours", "Busy hours"), ("uses", "What uses the Mac" if capps else "What uses memory"), ("claude", "What Claude runs"), ("how", "How this works")]
     tab_html = "".join(f'<button role=tab data-go="{k}" aria-controls="p-{k}">{t}</button>' for k, t in tabs)
 
-    return add_heat(add_lesson(f"""<!doctype html><html lang=en><head><meta charset=utf-8><script>try{{if(sessionStorage.getItem("mm-again"))document.documentElement.classList.add("again")}}catch(_){{}}
+    return add_today_cpu(add_heat(add_lesson(f"""<!doctype html><html lang=en><head><meta charset=utf-8><script>try{{if(sessionStorage.getItem("mm-again"))document.documentElement.classList.add("again")}}catch(_){{}}
 setTimeout(function(){{try{{sessionStorage.setItem("mm-again","1")}}catch(_){{}}location.reload()}},60000)</script>
 <style>html{{background:#fff7d6}}</style>
 <script>addEventListener("load",function(){{if(!document.documentElement.classList.contains("again"))return;
@@ -622,10 +702,17 @@ svg.ts{{width:100%;height:auto;display:block;overflow:visible;touch-action:pan-y
 .legend i.cz{{width:12px;height:12px;border-radius:3px;vertical-align:-1px}} .tip i.cz{{border-radius:3px}}
 .verdict{{margin:4px 0 14px}} .vbar{{display:flex;height:22px;border-radius:8px;overflow:hidden;background:color-mix(in srgb,var(--ram) 10%,transparent);margin:10px 0 8px;gap:2px}}
 .vbar i{{display:block;height:100%}} .vkey b{{color:var(--fg)}}
-.ladders{{display:flex;flex-direction:column;gap:18px}} .ladders.cpufirst .lcpu{{order:-1}}
+.ladders{{display:flex;flex-direction:column;gap:18px}}
+h2 .nw{{white-space:nowrap}}
+.todays{{display:flex;flex-direction:column;gap:14px}} .todays.cpufirst .tcpu{{order:-1}}
+.ws{{width:100%;height:auto;display:block;overflow:visible;margin-top:6px}}
+.ws .wa{{fill:color-mix(in srgb,var(--c-cpu) 14%,transparent)}} .ws .wl{{fill:none;stroke:var(--c-cpu);stroke-width:2;stroke-linejoin:round}}
+.ws .wah{{fill:color-mix(in srgb,var(--c-cpu) 40%,transparent)}} .ws .wlh{{fill:none;stroke:var(--c-cpu);stroke-width:3;stroke-linejoin:round}}
+.ws .ceil{{stroke:var(--fg);stroke-width:2;stroke-dasharray:2 8;stroke-linecap:round;opacity:.7}}
+.ws .xh{{stroke:var(--fg);stroke-width:1;opacity:0}} .ws.hovering .xh{{opacity:.35}} .ladders.cpufirst .lcpu{{order:-1}}
 #p-hours .hmc,#p-hours .hleg-cause,#p-hours .hl-cause{{display:none}} #p-hours.bycause .hmc,#p-hours.bycause .hl-cause{{display:inline}} #p-hours.bycause .hleg-cause{{display:flex}} #p-hours.bycause .hleg-mem,#p-hours.bycause .hl-mem,#p-hours.bycause .hc circle{{display:none}}
 .list{{margin-top:10px;display:grid;gap:7px}}
-.jtabs{{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}} .jt{{font:600 13px Geist,sans-serif;border:2px solid var(--line);background:transparent;border-radius:99px;padding:5px 14px;cursor:pointer;color:inherit}} .jt[aria-pressed=true]{{background:#1f2a44;color:#fff;border-color:#1f2a44}}
+.jtabs{{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}} .jt{{font:600 13px Geist,sans-serif;border:2px solid var(--line);background:transparent;border-radius:99px;padding:5px 14px;cursor:pointer;color:inherit}} .jt[aria-pressed=true]{{background:var(--fg);color:var(--bg);border-color:var(--fg)}}
 .jobs .jr{{grid-template-columns:minmax(0,17rem) 1fr 5.5rem}} .jobs .list{{max-height:52vh;overflow:auto;padding-right:4px}} details.kind summary{{list-style:none;cursor:pointer}} details.kind summary::-webkit-details-marker{{display:none}} details.kind summary .jr span b::before{{content:"\\25B8  ";color:var(--mute)}} details.kind[open] summary .jr span b::before{{content:"\\25BE  "}}
 details.kind summary .row:not(.jr) span::before{{content:"\\25B8  ";color:var(--mute)}} details.kind[open] summary .row:not(.jr) span::before{{content:"\\25BE  "}}
 .kd{{font-size:12.5px;color:var(--mute);margin:4px 0 6px 1.2rem}} details.kind .jl{{position:static;width:auto;background:none;color:inherit;box-shadow:none;border-radius:0;z-index:auto;list-style:none;margin:0 0 10px 1.2rem;padding:0;display:grid;gap:4px;font-size:12.5px}} .jl li{{display:flex;justify-content:space-between;gap:10px}} .jl i{{font-style:normal;color:var(--mute)}} .jl em{{font-style:normal;font-family:'Geist Mono',monospace;color:var(--mute);white-space:nowrap}}
@@ -747,9 +834,25 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 </div></section>
 
 <section class=panel id=p-today role=tabpanel><div class=inner>
-<div class=en><p class=kick><i class=dot></i>{status_line}</p><h2 class=big>{"Today it needed <em>" + gb(peak) + " GB</em>" if peak > TOTAL else "Today it has <em>fitted</em> so far"}</h2></div>
-<p class="lede en" style="--n:1">The red line is everything the Mac is holding. Above the dotted {TOTAL:.0f} GB line it no longer fits, so the striped part sits on the disk, and the drops underneath are the minutes it was busy moving memory out. Hover to read any minute.</p>
-<div class=two>
+<div class=en><p class=kick><i class=dot></i>{status_line}</p><h2 class=big>{("Processors held it up <em class=nw>" + span(cpu_today) + "</em> today") if cpu_first and cpu_today else ("Today it needed <em>" + gb(peak) + " GB</em>" if peak > TOTAL else "Today it has <em>fitted</em> so far")}</h2></div>
+<p class="lede en" style="--n:1">{"Two things can hold it up, and the one that held it up more comes first. " if has_w else ""}{"The purple line is work waiting for the processors: above its dotted line there was more work than its " + str(cores_n) + " cores could run. " if has_w else ""}The red line is everything held in memory: above the dotted {TOTAL:.0f} GB line it no longer fits, so the striped part sits on the disk, and the drops are the minutes it was moving memory out. Hover to read any minute.</p>
+<div class="todays{" cpufirst" if cpu_first else ""}">
+{f"""<div class="two tcpu">
+<div class="c chartbox en" style="--n:2" id=cchart>
+<small>Processors: work waiting, as &times; its {cores_n} cores</small>
+<svg class=ws viewBox="0 -14 {W} {CH_ + 52}" role=img aria-label="Work waiting for the processors per minute, against the {cores_n} cores this Mac has">
+<clipPath id=wabove><rect x=0 y=-20 width={W} height={CY(1) + 20:.1f} /></clipPath>
+<rect class=czb x=0 y=10 width={W} height={CH_} rx=8 />{cpoly}
+<line class=ceil x1=0 x2={W} y1={CY(1):.1f} y2={CY(1):.1f} /><text x={W} y=2 class=tk text-anchor=end>dotted line: 1&times;, more work than its {cores_n} cores can run</text>
+{f'<text x="{X(cruns[0][0][0]) - 6:.1f}" y="{CH_ + 2}" class=tk text-anchor=end>measured from {e(T[cruns[0][0][0]][11:])}</text>' if cruns and cruns[0][0][0] > 30 else ""}
+{ticks.replace(f'y="{H + 20}"', f'y="{CH_ + 32}"')}
+<line class=xh x1=0 x2=0 y1=10 y2={10 + CH_} /></svg>
+<div class=tip id=ctip></div>
+<script type=application/json id=cdata>{cdata}</script>
+</div>
+<div class="c en" style="--n:3"><small>Who kept the processors busy today{f", worst at {e(T[worst_w[1]][11:])} ({worst_w[0]:.1f}&times;)" if worst_w[1] is not None else ""}</small><div class=list>{cwho}</div></div>
+</div>""" if has_w else ""}
+<div class="two tmem">
 <div class="c chartbox en" style="--n:2" id=chart>
 <svg class=ts viewBox="0 -30 {W} {H + 170}" role=img aria-label="Memory needed per minute against the {TOTAL:.0f} GB the Mac has">
 <clipPath id=above><rect x=0 y=-40 width={W} height={ram_y + 40:.1f} /></clipPath><clipPath id=below><rect x=0 y={ram_y:.1f} width={W} height={H} /></clipPath>
@@ -778,58 +881,66 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 </div>
 <div class="legend en" style="--n:4"><span><i style="background:var(--hot)"></i>memory needed (in RAM + parked on disk)</span><span><i style="background:var(--ram)"></i>in RAM</span><span><i style="background:repeating-linear-gradient(45deg,var(--hot) 0 2px,transparent 2px 5px)"></i>overflow onto disk</span><span>{swap_mins} minutes swapping, {heavy_mins} of them heavy</span></div>
 <div class="legend en" style="--n:5">{CAUSE_KEY}</div>
+</div>
 </div></section>
 
 {heat_sec}
 <section class=panel id=p-days role=tabpanel><div class=inner>
-<div class=en><p class=kick>Every day since {first.strftime("%-d %B")}</p><h2 class=big>Over {TOTAL:.0f} GB on <em>{over_days} of {len(meas)}</em> measured days</h2></div>
-<p class="lede en" style="--n:1">Above the line: how many Claude Code sessions ran at once, one head each. {busy_days} days reached 10 or more. Below the line: how far that day's busiest minute went past {TOTAL:.0f} GB, and under that, how many minutes something held the Mac up, coloured by what. Memory has only been measured since {since}.</p>
-<div class="c en" style="--n:2"><svg class=hist style="max-height:52vh" viewBox="0 -24 {HW} {CY0 + CHh + 46:.0f}" role=img aria-label="One timeline: Claude Code sessions open at once each day above, memory over this Mac's RAM below">
+<div class=en><p class=kick>Every day since {first.strftime("%-d %B")}</p><h2 class=big>{f"Held up on <em>{len(held_days)} of {len(meas)}</em> measured days" if cpu_from else f"Over {TOTAL:.0f} GB on <em>{over_days} of {len(meas)}</em> measured days"}</h2></div>
+<p class="lede en" style="--n:1">Above the line: how many Claude Code sessions ran at once, one head each. {busy_days} days reached 10 or more. Below the line: how many minutes something held the Mac up, coloured by what held it up (a day counts as held up after half an hour), and under that, how far the busiest minute went past {TOTAL:.0f} GB. Memory has only been measured since {since}.</p>
+<div class="c en" style="--n:2"><svg class=hist style="max-height:52vh" viewBox="0 -24 {HW} {M0 + OH + 40:.0f}" role=img aria-label="One timeline: Claude Code sessions open at once each day above, memory over this Mac's RAM below">
 <text x=4 y=-12 class=tk>&#9650; Claude Code sessions at once (from my session logs)</text>
 <line x1=0 x2={HW} y1={ten_y:.1f} y2={ten_y:.1f} stroke="var(--hot)" stroke-dasharray="2 7" stroke-width=2 stroke-linecap=round opacity=".7"/>
 <text x=4 y={ten_y - 8:.1f} class=tk>10 at once</text>
 {"".join(heads)}{hticks}
 <line x1=0 x2={HW} y1={HH + 30:.1f} y2={HH + 30:.1f} stroke="var(--line)" stroke-width="2"/>
-<g transform="translate(0 {HH + 34:.1f})">{"".join(obars)}</g>
-<text x=4 y={HH + OH + 48:.1f} class=tk>&#9660; Memory over {TOTAL:.0f} GB at the busiest minute (measured from {since}; dots = not measured)</text>
 <g transform="translate(0 {CY0:.1f})">{"".join(cbars)}</g>
-<text x=4 y={CY0 + CHh + 26:.1f} class=tk>&#9660; Minutes held up, coloured by what held it up{f" (processors measured from {dt.datetime.strptime(cpu_from, '%Y-%m-%d %H:%M').strftime('%-d %b')})" if cpu_from else ""}</text></svg>
+<text x=4 y={CY0 + CHh + 18:.1f} class=tk>&#9660; Minutes held up, coloured by what held it up{f" (processors measured from {dt.datetime.strptime(cpu_from, '%Y-%m-%d %H:%M').strftime('%-d %b')})" if cpu_from else ""}</text>
+<g transform="translate(0 {M0:.1f})">{"".join(obars)}</g>
+<text x=4 y={M0 + OH + 14:.1f} class=tk>&#9660; Memory over {TOTAL:.0f} GB at the busiest minute (measured from {since}; dots = not measured)</text></svg>
 <div class=legend style="margin-top:8px">{CAUSE_KEY}</div>
-<ol class="top meas">{"".join(f'<li><b>+{max(dmem[d][0] - TOTAL, 0):.1f} GB</b><span>over {TOTAL:.0f} GB &middot; {day_sess.get(d, (0, ""))[0]} sessions<br><i>{dt.date.fromisoformat(d).strftime("%a %-d %b")} &middot; {heavy.get(d, 0)} min heavy swapping</i></span></li>' for d in sorted(meas, reverse=True))}</ol>
+<ol class="top meas">{"".join((f'<li><b>{span(dheld[d])}</b><span>held up, mostly {held(dom_(d))} &middot; {day_sess.get(d, (0, ""))[0]} sessions<br><i>{dt.date.fromisoformat(d).strftime("%a %-d %b")} &middot; +{max(dmem[d][0] - TOTAL, 0):.1f} GB over {TOTAL:.0f} GB{"" if cpu_from and d >= cpu_from[:10] else " &middot; processors not measured"}</i></span></li>' if dheld[d] else f'<li><b>+{max(dmem[d][0] - TOTAL, 0):.1f} GB</b><span>over {TOTAL:.0f} GB &middot; {day_sess.get(d, (0, ""))[0]} sessions<br><i>{dt.date.fromisoformat(d).strftime("%a %-d %b")} &middot; {heavy.get(d, 0)} min heavy swapping</i></span></li>') for d in sorted(meas, reverse=True))}</ol>
 <p class=note>Measured since {since}: {over_days} of {len(meas)} days went over {TOTAL:.0f} GB{f", the worst by {dmem[worst_d][0] - TOTAL:.1f} GB on {dt.date.fromisoformat(worst_d).strftime('%a %-d %b')} with {heavy.get(worst_d, 0)} minutes of heavy swapping" if worst_d else ""}. Earlier days were not measured (faint dots); their session counts above are the only record.</p></div>
 <div class=en style="--n:3"><p class=kick style="margin-bottom:8px">Busiest days</p><ol class=top>{top_html}</ol></div>
 </div></section>
 
-<section class=panel id=p-hours role=tabpanel><div class=inner>
-<div class=en><p class=kick>Working hours, 7am to midnight</p><h2 class=big>{TOTAL:.0f} GB ran out in <em>{len(over_cells)} of {filled}</em> hours seen</h2></div>
-<p class="lede en" style="--n:1"><span class=hl-mem>{hours_take} Each square is one hour of one weekday, darker for more memory needed; a white dot means it went over {TOTAL:.0f} GB.</span><span class=hl-cause>Each square is one hour of one weekday, coloured by what held it up most in that hour; paler means fewer of its minutes were held up.</span> Blank squares have no readings yet.</p>
-<div class="c en hmcard" style="--n:2"><div class=jtabs role=group aria-label="Colour the squares by"><button type=button class="jt hmt" data-hm=mem aria-pressed=true>Memory needed</button><button type=button class="jt hmt" data-hm=cause aria-pressed=false>What held it up</button></div>
+<section class="panel{" bycause" if cpu_first else ""}" id=p-hours role=tabpanel><div class=inner>
+<div class=en><p class=kick>Working hours, 7am to midnight</p><h2 class=big><span class=hl-mem>{TOTAL:.0f} GB ran out in <em>{len(over_cells)} of {filled}</em> hours seen</span><span class=hl-cause>Held up in <em>{held_hours} of {seen_hours}</em> hours seen</span></h2></div>
+<p class="lede en" style="--n:1"><span class=hl-mem>{hours_take} Each square is one hour of one weekday, darker for more memory needed; a white dot means it went over {TOTAL:.0f} GB.</span><span class=hl-cause>Each square is one hour of one weekday, coloured by what held it up most in that hour; paler means fewer of its minutes were held up, and an hour counts as held up when a tenth of it was.</span> Blank squares have no readings yet.</p>
+<div class="c en hmcard" style="--n:2"><div class=jtabs role=group aria-label="Colour the squares by"><button type=button class="jt hmt" data-hm=cause aria-pressed={"true" if cpu_first else "false"}>What held it up</button><button type=button class="jt hmt" data-hm=mem aria-pressed={"false" if cpu_first else "true"}>Memory needed</button></div>
 <svg class=heat viewBox="0 0 {heat_w} {heat_h}" role=img aria-label="Highest memory needed by weekday and hour, or what held each hour up">{heat_svg}</svg>
 <div class="legend hleg-cause" style="margin-top:12px">{CAUSE_KEY}<span>paler = held up for fewer of its minutes</span>{f"<span>processors measured from {dt.datetime.strptime(cpu_from, '%Y-%m-%d %H:%M').strftime('%-d %b')}; before that only memory could show</span>" if cpu_from else ""}</div>
 <div class="legend hleg-mem" style="margin-top:12px"><span>lighter = less</span><span class=ramp></span><span>darker = more ({lo_:.0f} to {hi_:.0f} GB)</span><span><i style="background:#fff;border:2px solid var(--hot);width:10px;height:10px;border-radius:50%;vertical-align:-1px"></i>over {TOTAL:.0f} GB</span></div></div>
 </div></section>
 
 <section class=panel id=p-uses role=tabpanel><div class=inner>
-<div class=en><p class=kick>Every app, and what Claude runs underneath, refreshed every minute</p><h2 class=big>What uses <em>memory</em></h2></div>
+<div class=en><p class=kick>Every app, and what Claude runs underneath, refreshed every minute</p><h2 class=big>What uses <em>{"the Mac" if capps else "memory"}</em></h2></div>
 <div class=whogrid>
 <div class=en style="--n:1"><!--YARD--></div>
-<div class="c en jobs" style="--n:2"><div class=jtabs role=group aria-label="Time window">{uses_tabs}</div>{uses_views}
+<div class=en style="--n:2">{mtabs("uses", m_first)}
+{f"""<div class="c jobs mbox" data-m=cpu{"" if m_first == "cpu" else " hidden"}><div class=jtabs role=group aria-label="Time window">{cuses_tabs}</div>{cuses_views}
+<p class=note style="margin-top:10px">Each app&#x27;s share of all {cores_n} cores. Tap a Claude row to see its groups and scripts.</p></div>""" if capps else ""}
+<div class="c jobs mbox" data-m=mem{"" if m_first == "mem" else " hidden"}><div class=jtabs role=group aria-label="Time window">{uses_tabs}</div>{uses_views}
 <p class=note style="margin-top:10px">Tap a Claude row to see its groups and the scripts in each, with the session folder that started them.{f" The hidden test browsers peaked at {br_peak:.1f} GB this week." if br_peak >= 1 else ""}</p></div>
-</div></div></section>
+</div></div></div></section>
 
 <section class=panel id=p-claude role=tabpanel><div class=inner>
-<div class=en><p class=kick>The tools and hidden browsers Claude starts, by kind, refreshed every minute</p><h2 class=big>{(e(take_k[0]) + " peaked at <em>" + f"{take_k[1]:.1f}" + " GB</em> this week") if take_k else "What Claude <em>runs</em>"}</h2></div>
-<div class="c en jobs" style="--n:2"><div class=jtabs role=group aria-label="Time window">{jobs_tabs}</div>{jobs_views}
-<p class=note style="margin-top:10px">Tap a group to see its scripts and the Claude session folder that started each one. Tracked since {e(tfirst or "now")}.</p></div>
+<div class=en><p class=kick>The tools and hidden browsers Claude starts, by kind, refreshed every minute</p><h2 class=big>{(e(take_kc[0]) + " peaked at <em>" + f"{take_kc[1]:.0f}%" + "</em> of the processors this week") if m_first_c == "cpu" and take_kc else (e(take_k[0]) + " peaked at <em>" + f"{take_k[1]:.1f}" + " GB</em> this week") if take_k else "What Claude <em>runs</em>"}</h2></div>
+<div class=en style="--n:2">{mtabs("claude", m_first_c)}
+{f"""<div class="c jobs mbox" data-m=cpu{"" if m_first_c == "cpu" else " hidden"}><div class=jtabs role=group aria-label="Time window">{cjobs_tabs}</div>{cjobs_views}
+<p class=note style="margin-top:10px">Share of all {cores_n} cores. Tap a group to see its scripts and the Claude session folder that started each one. Tracked since {e(min(tjc) if tjc else "the next reading")}.</p></div>""" if capps else ""}
+<div class="c jobs mbox" data-m=mem{"" if m_first_c == "mem" else " hidden"}><div class=jtabs role=group aria-label="Time window">{jobs_tabs}</div>{jobs_views}
+<p class=note style="margin-top:10px">Tap a group to see its scripts and the Claude session folder that started each one. Tracked since {e(tfirst or "now")}.</p></div></div>
 </div></section>
 
 <section class=panel id=p-how role=tabpanel><div class=inner>
 <div class=en><p class=kick>What is measured, and what is not</p><h2 class=big>How this <em>works</em></h2></div>
 <div class="c en howc" style="--n:1"><ul>
-<li><b>Every minute</b> a background job reads macOS figures (<code>vm_stat</code>, <code>sysctl</code>, <code>ps</code>) into <code>~/memlog/</code>{', copied to Google Drive every 15 minutes' if cfg.get('drive_backup') else ''}: memory in use, memory on disk, memory per app, the scripts Claude runs, and processor load. Nothing is sent anywhere else.</li>
+<li><b>Every minute</b> a background job reads macOS figures (<code>vm_stat</code>, <code>sysctl</code>, <code>ps</code>) into <code>~/memlog/</code>{', copied to Google Drive every 15 minutes' if cfg.get('drive_backup') else ''}: memory in use, memory on disk, memory and processor share per app, the scripts Claude runs with each one&#x27;s memory and processor share, and processor load. Nothing is sent anywhere else.</li>
 <li><b>Memory needed</b> is memory in use plus memory parked on disk (swap). Swap can keep old data from hours earlier, so this can overstate the real need; the minutes the Mac was actively moving memory to disk are shown separately as the drops on the Today chart.</li>
 <li><b>The recommendation</b> is the busiest minute ever measured plus a quarter, rounded up to a size Macs come in. The budget pick is the smallest size that would have covered 99% of working minutes. Storage is what is in use now plus half again. The processor pick is the smallest core count that would have kept up in 9 working minutes of 10; it counts cores only, and newer chips&#x27; cores are faster than an older Mac&#x27;s, so it overstates the need.</li>
 <li><b>Processors</b> are measured as work waiting: the 1-minute load average divided by the number of cores. Above 1&times;, more work is waiting than the cores can run, so things slow down. &ldquo;% busy&rdquo; is not used for this because on Apple chips half the cores are slower ones: the fast half can be full while the total reads 50 to 60%.</li>
+<li><b>Every tab leads with what held the Mac up more</b> since the processors were first measured: Today opens on the processors chart or the memory chart, Busy days counts a day as held up after half an hour of it, Busy hours opens on &ldquo;What held it up&rdquo; (an hour counts when a tenth of it was), and What uses the Mac and What Claude runs open on processors or memory. Every one has a switch or a second chart for the other.</li>
 <li><b>What held it up</b> labels each minute, the same way on every tab: <i>processors</i> when work is waiting, <i>memory</i> when it pushes 100 MB a minute or more to disk, <i>memory and processors</i> when both happen in the same minute, and <i>heat</i> when macOS&#x27;s own heat level is fair or worse, meaning it is slowing the chip down to cool it (heat wins over the others then, because it is what made the processors slower). A hot chip and a loud fan alone do not count: they make the Mac loud, not slow.</li>
 <li><b>Hot &amp; slow</b> reads, each minute and without admin rights: the hottest processor temperature sensor and the fan speed (from a small Swift program, <code>heat</code>, built at install), macOS&#x27;s graphics load (<code>ioreg</code>), disk bytes read and written (<code>ioreg</code>), network bytes in and out (<code>netstat</code>) and each app&#x27;s share of the processors (<code>ps</code>). It also records macOS&#x27;s own heat level; when that goes above normal, macOS is slowing the Mac down to cool it, and the temperature tile says so. The dotted lines (90 &deg;C, fan at 60%, work waiting above 1&times; the cores, graphics 85% busy, 1 GB a minute of disk, 100 MB a minute pushed to disk, 500 MB a minute of network) are rules of thumb, not limits macOS enforces.</li>
 <li><b>Per-app memory</b> counts memory still in memory, not on disk. Memory two apps share can be counted twice. Meet is counted inside Chrome.</li>
@@ -895,7 +1006,12 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
     card.querySelectorAll(".hmt").forEach(x => x.setAttribute("aria-pressed", x === b));
     try {{ localStorage.setItem("mm-hours-by", b.dataset.hm); }} catch (_) {{}}
   }}));
-  try {{ if (localStorage.getItem("mm-hours-by") === "cause") document.querySelector('.hmt[data-hm="cause"]')?.click(); }} catch (_) {{}}
+  try {{ const hb = localStorage.getItem("mm-hours-by"); if (hb) document.querySelector(`.hmt[data-hm="${{hb}}"]`)?.click(); }} catch (_) {{}}
+  // Processors or memory, on What uses the Mac and What Claude runs; one choice for both tabs.
+  const setM = m => document.querySelectorAll(".mtabs").forEach(g => {{ const p = g.closest(".panel"), b = g.querySelector(`.mt[data-m="${{m}}"]`); if (!b) return;
+    g.querySelectorAll(".mt").forEach(x => x.setAttribute("aria-pressed", x === b)); p.querySelectorAll(".mbox").forEach(x => x.hidden = x.dataset.m !== m); }});
+  document.querySelectorAll(".mt").forEach(b => b.addEventListener("click", () => {{ setM(b.dataset.m); try {{ localStorage.setItem("mm-measure", b.dataset.m); }} catch (_) {{}} }}));
+  try {{ const mm = localStorage.getItem("mm-measure"); if (mm) setM(mm); }} catch (_) {{}}
   document.querySelectorAll(".jobs .jt").forEach(b => b.addEventListener("click", () => {{
     const box = b.closest(".jobs"), key = "mm-win-" + b.closest(".panel").id;
     box.querySelectorAll(".jt").forEach(x => x.setAttribute("aria-pressed", x === b));
@@ -942,7 +1058,36 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
   if (!still) setInterval(() => {{ if (hover < 0) {{ step = (step + Math.max(1, Math.round(n / 120))) % n; put(step); }} }}, 250);
 }})();
 let seen = false; try {{ seen = sessionStorage.getItem("mm-seen") === "1"; sessionStorage.setItem("mm-seen", "1"); }} catch (_) {{}}
-</script></body></html>"""))
+</script></body></html>""")))
+
+
+TODAY_CPU_JS = """<script>
+(() => {
+  // Today's processors chart: a crosshair and a tip with the work waiting and the busiest apps at that minute.
+  const box = document.getElementById("cchart"), dEl = document.getElementById("cdata");
+  if (!box || !dEl) return;
+  const C = JSON.parse(dEl.textContent), svg = box.querySelector("svg.ws"), tip = document.getElementById("ctip"), xh = svg.querySelector(".xh");
+  const n = C.t.length, W = 1000;
+  const at = ev => {
+    const r = svg.getBoundingClientRect(), b = box.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+    const x = (ev.clientX - r.left) * vb.width / r.width + vb.x, i = Math.max(0, Math.min(n - 1, Math.round(x / W * (n - 1)))), vx = i * W / Math.max(n - 1, 1);
+    xh.setAttribute("x1", vx); xh.setAttribute("x2", vx); svg.classList.add("hovering");
+    const w = C.w[i], ap = C.apps[i];
+    tip.innerHTML = `<b>${C.t[i].slice(11)}</b><br>` + (w == null ? "processors not measured" : `${w.toFixed(1)}&times; its ${C.cores} cores, ${w > 1 ? "work waiting" : "keeping up"}`)
+      + (ap ? `<br>${ap.map(([g, v]) => `${g} ${Math.round(v)}%`).join(", ")}` : "");
+    const yv = w == null ? C.ch : 10 + C.ch - Math.min(w, C.top) * C.ch / C.top;
+    tip.style.left = (r.left - b.left + (vx - vb.x) * r.width / vb.width) + "px";
+    tip.style.top = (r.top - b.top + (yv - vb.y - 30) * r.height / vb.height) + "px";
+  };
+  svg.addEventListener("pointermove", at);
+  svg.addEventListener("pointerdown", ev => { if (ev.pointerType !== "mouse") box.classList.add("touch"); at(ev); });
+  svg.addEventListener("pointerleave", () => { svg.classList.remove("hovering"); box.classList.remove("touch"); });
+})();
+</script>"""
+
+
+def add_today_cpu(page):
+    return page.replace("</body>", TODAY_CPU_JS + "</body>", 1)
 
 
 # ---------- Recommendation: the buddy teaches how it got to the answer ----------
