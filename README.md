@@ -30,11 +30,12 @@ This measures instead. It reads macOS's own memory figures once a minute, keeps 
 
 | | Feature | The specifics |
 |---|---|---|
-| 🎯 | **A measured recommendation, explained** | Busiest minute ever recorded × 1.25, rounded up to a size Macs are sold in, and the buddy walks you through how it got there, step by step. Plus a budget pick (smallest size that covered 99% of working minutes) and storage (current use × 1.5). Updates itself every minute. |
-| 📊 | **"Would it have fitted?" ladder** | For 16 / 24 / 32 / 36 / 48 / 64 GB: the share of your working minutes (7am to midnight) each size would have handled, with and without Claude's hidden test browsers. |
+| 🎯 | **A measured recommendation, explained** | Busiest minute ever recorded × 1.25, rounded up to a size Macs are sold in, and the buddy walks you through how it got there, step by step. Plus a budget pick (smallest size that covered 99% of working minutes), a first-guess chip (fewest cores that would have kept up 9 working minutes in 10) and storage (current use × 1.5). Updates itself every minute. |
+| 🚦 | **What held it up** | Every minute is labelled by what slowed the Mac: processors (more work waiting than the cores can run), memory (100 MB a minute or more pushed to disk), both, or heat (macOS slowing the chip to cool it). One colour key on Recommendation, Today, Busy days and Busy hours, and the bigger cause is listed first. |
+| 📊 | **"Would it have fitted?" ladders** | For 16 / 24 / 32 / 36 / 48 / 64 GB: the share of your working minutes (7am to midnight) each size would have handled, with and without Claude's hidden test browsers. The same for chips with 8 to 16 cores. |
 | 📈 | **Today, minute by minute** | Memory needed against your RAM line, the striped overflow onto disk, and the minutes the Mac was actively moving memory to disk. Hover any minute. |
-| 🔥 | **Hot & slow** | Chip temperature, fan speed, processors, graphics, disk traffic, memory pushed to disk and network traffic, minute by minute, each with a "too much" line (90 °C, fan at 60%, 85% busy…). Plus which apps kept the processors busy while it ran hot. No admin rights needed. |
-| 📅 | **Busy days and busy hours** | One timeline since the history start: Claude Code sessions open at once above the line, memory over your RAM below it. Plus a weekday × hour heatmap. |
+| 🔥 | **Hot & slow** | Chip temperature, fan speed, processors, graphics, disk traffic, memory pushed to disk and network traffic, minute by minute, each with a "too much" line (90 °C, fan at 60%, more work than cores…). Plus which apps kept the processors busy while it ran hot. No admin rights needed. |
+| 📅 | **Busy days and busy hours** | One timeline since the history start: Claude Code sessions open at once above the line, memory over your RAM below it. Below that, the minutes something held it up each day. Plus a weekday × hour heatmap, coloured by memory needed or by what held each hour up. |
 | 🧸 | **Who is using it** | One walking banana buddy per app and per Claude Code session, sized by memory. Every app's memory now / 24 h / 7 days / 30 days. |
 | 🤖 | **What Claude runs** | Claude's tools grouped into plain kinds (test browsers, page checks, cloud tools, plug-ins, build scripts, shell), each opening into its scripts and the session folder that started them. |
 | 🪶 | **Light** | One run takes about 0.6 s a minute and stores about 2 MB of readings a day. Nothing is sent anywhere. |
@@ -145,8 +146,8 @@ Re-running `install.sh` upgrades the code and keeps your readings and settings. 
 - **It leans high.** "Memory needed" is RAM in use plus swap, and swap can hold stale data from hours earlier. The minutes the Mac was *actively* writing to disk are shown separately as the fairer slowdown signal.
 - **Per-app figures are approximate.** They count memory still in RAM (not on disk), memory two apps share can be counted twice, and Meet or Zoom in a browser count as the browser.
 - **History before install is partial.** Days before the monitor started come from Claude Code transcripts only; Codex and sessions idle for 30+ minutes are not counted.
-- **Processor load is recorded but light-touch:** share of all cores busy per minute, and each app's share. It tells you whether memory or the chip is the limit, not which chip to buy.
-- **The heat lines are rules of thumb.** 90 °C, a fan at 60% and 85% busy are where a Mac usually feels hot, loud or slow, not limits macOS enforces. Temperature and fan need the Xcode command line tools (for `swiftc`) at install; without them those two strips stay empty. Fan speed reads blank on a Mac with no fan.
+- **The chip pick is a rough guide.** Processors are measured as work waiting (the 1-minute load average over the core count), which says when the chip was the limit. The ladder counts cores only, and newer chips' cores are faster than an older Mac's, so it overstates the need; it also says nothing about graphics.
+- **The heat lines are rules of thumb.** 90 °C, a fan at 60% and 85% graphics busy are where a Mac usually feels hot, loud or slow, not limits macOS enforces. Temperature and fan need the Xcode command line tools (for `swiftc`) at install; without them those two strips stay empty. Fan speed reads blank on a Mac with no fan.
 - **macOS only.** It reads `vm_stat`, `sysctl`, `ps`, `ioreg` and `netstat`, plus a small Swift helper for temperature and fan, and runs under launchd.
 
 ## How it works

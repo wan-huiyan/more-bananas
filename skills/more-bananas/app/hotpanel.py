@@ -18,8 +18,8 @@ STRIPS = [
      "words": ("cool", "warm", "hot"), "mid": 70},
     {"k": "fan", "name": "Fan", "unit": "% of full speed", "lo": 0, "hi": 100, "line": 60, "line_txt": "60%: loud",
      "words": ("quiet", "audible", "loud"), "mid": 35},
-    {"k": "cpu", "name": "Processors", "unit": "% busy", "lo": 0, "hi": 100, "line": 85, "line_txt": "85%: flat out",
-     "words": ("fine", "busy", "flat out"), "mid": 60},
+    {"k": "cpu", "name": "Processors", "unit": "work waiting, as × its cores", "lo": 0, "hi": None, "line": 1,
+     "line_txt": "1×: more work than its cores can run", "words": ("keeping up", "busy", "work waiting"), "mid": .6},
     {"k": "gpu", "name": "Graphics", "unit": "% busy", "lo": 0, "hi": 100, "line": 85, "line_txt": "85%: flat out",
      "words": ("fine", "busy", "flat out"), "mid": 60},
     {"k": "disk", "name": "Disk reads and writes", "unit": "MB a minute", "lo": 0, "hi": None, "line": 1000,
@@ -30,6 +30,10 @@ STRIPS = [
      "line_txt": "500 MB a minute: heavy", "words": ("light", "busy", "heavy"), "mid": 100},
 ]
 HOT_TEMP, LOUD_FAN = 90, 60   # a minute counts as "ran hot" when the chip reached 90 °C or the fan passed 60%
+SWAP_HARD = 100               # MB a minute pushed to disk: memory is holding the Mac up
+SLOWING = ("fair", "serious", "critical")   # macOS's own heat levels at which it holds the chip back to cool it
+# What held a minute up, in the order the page draws them. The colours live in report.py's CSS (--c-cpu and so on).
+CAUSE_NAMES = {"cpu": "processors", "mem": "memory", "both": "memory and processors", "heat": "heat"}
 
 
 def _rows(path, ncol):
@@ -52,11 +56,35 @@ def _span(minutes):
     return f"{h} h {m} min" if h else f"{m} min"
 
 
+def minute_causes(home):
+    """What held each minute up, for every minute with a memory or processor reading.
+
+    Returns ({minute: cause}, first minute the processors were measured or None). cause is one of
+    "" (nothing did), "mem" (pushing SWAP_HARD MB a minute or more to disk), "cpu" (more work waiting than the
+    cores can run: 1-minute load average above the core count), "both", or "heat" (macOS at a heat level where it
+    slows the chip down; it wins over the others because it is what makes the processors slower).
+    Before the processors were measured, a minute can only be "mem" or "".
+    """
+    swap = {r[0]: _num(r[1]) for r in _rows(os.path.join(home, "live.csv"), 6)}
+    wait = {}
+    for r in _rows(os.path.join(home, "cpu.csv"), 4):
+        l_, c_ = _num(r[2]), _num(r[3])
+        if l_ is not None and c_:
+            wait[r[0]] = l_ / c_
+    state = {r[0]: r[1] for r in _rows(os.path.join(home, "heat.csv"), 6) if r[1]}
+    out = {}
+    for t in set(swap) | set(wait):
+        m, p = (swap.get(t) or 0) >= SWAP_HARD, (wait.get(t) or 0) > 1
+        out[t] = "heat" if state.get(t) in SLOWING else "both" if m and p else "mem" if m else "cpu" if p else ""
+    return out, (min(wait) if wait else None)
+
+
 def heat_section(home, today):
     """The panel's HTML for the day `today` ("YYYY-MM-DD"), or the last 24 hours early in the morning."""
     by = {s["k"]: {} for s in STRIPS}                     # measure -> {minute stamp: value}; a later row wins
-    for r in _rows(os.path.join(home, "cpu.csv"), 4):
-        by["cpu"][r[0]] = _num(r[1])
+    for r in _rows(os.path.join(home, "cpu.csv"), 4):      # work waiting: 1-minute load average over the core count
+        l_, c_ = _num(r[2]), _num(r[3])
+        by["cpu"][r[0]] = l_ / c_ if l_ is not None and c_ else None
     state = {}                                            # macOS's own heat level: nominal / fair / serious / critical
     for r in _rows(os.path.join(home, "heat.csv"), 6):
         by["temp"][r[0]] = _num(r[4])
@@ -94,6 +122,8 @@ def heat_section(home, today):
     for s in STRIPS:
         seen = [x for x in series[s["k"]] if x is not None]
         s["top"] = s["hi"] if s["hi"] is not None else max(max(seen, default=0) * 1.1, s["line"] * 1.3)
+        if s["k"] == "cpu":                                # a Chrome launch can spike it to 20x; past 4x is just "a lot"
+            s["top"] = min(s["top"], 4)
 
     def draw(W, SH, GAP, TOP, tag, wide):
         X = (lambda i: i * W / (n - 1)) if n > 1 else (lambda i: W / 2)
@@ -151,7 +181,7 @@ def heat_section(home, today):
         return s["words"][2] if x >= s["line"] else s["words"][1] if x >= s["mid"] else s["words"][0]
 
     def fmt(s, x):
-        return f'{x:.0f}<small>°C</small>' if s["k"] == "temp" else f'{x:.0f}<small>%</small>' if s["unit"].startswith("%") else f'{x:,.0f}<small> MB/min</small>'
+        return f'{x:.0f}<small>°C</small>' if s["k"] == "temp" else f'{x:.1f}<small>×</small>' if s["k"] == "cpu" else f'{x:.0f}<small>%</small>' if s["unit"].startswith("%") else f'{x:,.0f}<small> MB/min</small>'
 
     state_now = next((state[t] for t in reversed(minute) if t in state), "")
     tiles = []
@@ -171,7 +201,7 @@ def heat_section(home, today):
 
     # ---- headline: how long it ran hot today ----
     hot = [i for i in range(n) if (series["temp"][i] or 0) >= HOT_TEMP or (series["fan"][i] or 0) >= LOUD_FAN]
-    flat = [i for i in range(n) if (series["cpu"][i] or 0) >= 85]
+    flat = [i for i in range(n) if (series["cpu"][i] or 0) > 1]
     has_heat = any(x is not None for x in series["temp"] + series["fan"])
     when = "Today" if minute[0][:10] == minute[-1][:10] else "In the last 24 hours"
     if has_heat and hot:
@@ -179,7 +209,7 @@ def heat_section(home, today):
     elif has_heat:
         head = f"{when} it has stayed <em>cool</em>"
     else:
-        head = f"{when} the processors were <em>flat out</em> for {_span(len(flat))}" if flat else f"{when} the processors had <em>room</em>"
+        head = f"{when} the processors had <em>work waiting</em> for {_span(len(flat))}" if flat else f"{when} the processors had <em>room</em>"
     first_heat = next((minute[i][11:] for i in range(n) if series["temp"][i] is not None), None)
 
     # ---- who kept the processors busy: during the hot minutes if there are enough, otherwise all day ----
@@ -202,7 +232,7 @@ def heat_section(home, today):
             "state": [state.get(t, "") for t in minute],
             "apps": {str(i): sorted(apps[t].items(), key=lambda kv: -kv[1])[:3] for i, t in enumerate(minute) if t in apps},
             "n": n,
-            "names": {s["k"]: s["name"] for s in STRIPS}, "units": {s["k"]: s["unit"] for s in STRIPS}}
+            "names": {s["k"]: "Processors: work waiting" if s["k"] == "cpu" else s["name"] for s in STRIPS}, "units": {s["k"]: s["unit"] for s in STRIPS}}
     return f"""
 <section class=panel id=p-heat role=tabpanel><div class=inner>
 <div class=en><p class=kick><i class=dot></i>Everything that makes a Mac hot, loud or slow, measured every minute.</p><h2 class=big>{head}</h2></div>
@@ -255,13 +285,13 @@ HEAT_JS = """<script>
   const box = document.getElementById("hchart"), dEl = document.getElementById("hdata");
   if (!box || !dEl) return;
   const D = JSON.parse(dEl.textContent), tip = document.getElementById("htip");
-  const lines = {temp: 90, fan: 60, cpu: 85, gpu: 85, disk: 1000, swap: 100, net: 500};
-  const fmt = (k, v) => v == null ? "–" : k === "temp" ? Math.round(v) + " °C" : D.units[k].startsWith("%") ? Math.round(v) + "%" : Math.round(v).toLocaleString() + " MB/min";
+  const lines = {temp: 90, fan: 60, cpu: 1, gpu: 85, disk: 1000, swap: 100, net: 500};
+  const fmt = (k, v) => v == null ? "–" : k === "temp" ? Math.round(v) + " °C" : k === "cpu" ? v.toFixed(1) + "× its cores" : D.units[k].startsWith("%") ? Math.round(v) + "%" : Math.round(v).toLocaleString() + " MB/min";
   const at = (svg, ev) => {
     const r = svg.getBoundingClientRect(), b = box.getBoundingClientRect(), Wd = +svg.dataset.w, xh = svg.querySelector(".hxh");
     const x = Math.min(Math.max((ev.clientX - r.left) / r.width, 0), 1), i = Math.round(x * (D.n - 1)), vx = i * Wd / Math.max(D.n - 1, 1);
     xh.setAttribute("x1", vx); xh.setAttribute("x2", vx); svg.classList.add("hovering");
-    const over = k => D.s[k][i] != null && D.s[k][i] >= lines[k];
+    const over = k => D.s[k][i] != null && (k === "cpu" ? D.s[k][i] > 1 : D.s[k][i] >= lines[k]);
     const rows = Object.keys(D.names).map(k => `<div class="r${over(k) ? " hot" : ""}"><span>${D.names[k]}</span><b>${fmt(k, D.s[k][i])}${over(k) ? " <em>over the line</em>" : ""}</b></div>`).join("")
       + (D.state[i] && D.state[i] !== "nominal" ? `<div class="r hot"><span>macOS heat level</span><b>${D.state[i]} <em>slowing it down</em></b></div>` : "");
     const ap = D.apps[i] ? `<div class=ap>Busiest: ${D.apps[i].map(([g, v]) => `${g} ${Math.round(v)}%`).join(", ")}</div>` : "";

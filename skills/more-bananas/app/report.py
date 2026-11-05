@@ -9,7 +9,7 @@ import html
 import json
 import os
 
-from hotpanel import add_heat, heat_section
+from hotpanel import CAUSE_NAMES, add_heat, heat_section, minute_causes
 
 
 def gb(x):
@@ -93,19 +93,27 @@ def render(v):
     calm = out_mb < 5
     # The line says what the Mac is doing this minute: memory (pushing to disk) AND the processors, because a hot,
     # loud Mac with nothing going to disk is busy processors, and "quiet" alone would be wrong.
-    cpu_now = v.get("cpu_pct")
+    # Processors are measured as work waiting: the 1-minute load average over the core count. Above 1, more work is
+    # waiting than the cores can run. (% busy hides this on Apple chips, where half the cores are slower ones.)
+    wait_now = v["load1"] / v["cores"] if v.get("load1") is not None and v.get("cores") else None
     cpu_top = sorted(((x, g) for g, x in (v.get("cpu_by_group") or {}).items() if x >= 3), reverse=True)[:3]
     disk_now = "nothing is being pushed to disk" if calm else f"it is pushing {out_mb:.0f} MB a minute to disk"
-    if cpu_now is not None and cpu_now >= 60:
-        who = f" ({', '.join(f'{g} {x:.0f}%' for x, g in cpu_top)})" if cpu_top else ""
-        status_line = (f"Right now the processors are {min(cpu_now, 100):.0f}% busy{who}, enough to run warm and loud. "
+    if wait_now is not None and wait_now > 1:
+        who = f"; busiest: {', '.join(f'{g} {x:.0f}%' for x, g in cpu_top)}" if cpu_top else ""
+        status_line = (f"Right now the processors have {wait_now:.1f} times the work its {v['cores']} cores can run{who}, enough to run warm, loud and slow. "
                        + ("Memory is fine: nothing is being pushed to disk." if calm else f"And {disk_now}."))
     elif calm:
-        status_line = "Right now it is quiet: nothing is being pushed to disk" + (f", and the processors are {cpu_now:.0f}% busy." if cpu_now is not None else ".")
+        status_line = "Right now it is quiet: nothing is being pushed to disk" + (", and the processors are keeping up." if wait_now is not None else ".")
     else:
-        status_line = f"Right now {disk_now}" + (f", and the processors are {cpu_now:.0f}% busy." if cpu_now is not None else ".")
+        status_line = f"Right now {disk_now}" + (", and the processors are keeping up." if wait_now is not None else ".")
+    # What held each minute up (memory, processors, both, or heat), shared by Recommendation, Today, Busy days and hours.
+    cause, cpu_from = minute_causes(v["HOME"])
+    def held(c_):
+        return CAUSE_NAMES[c_]
     peak_when = dt.datetime.strptime(T[pk], "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M")
     swap_when = dt.datetime.strptime(LT[lpk], "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M")
+
+    CAUSE_KEY = "".join(f'<span><i class="cz {k_}"></i>{CAUSE_NAMES[k_]}</span>' for k_ in ("cpu", "both", "mem", "heat"))
 
     # ---------- panel 2: the busy-stretch chart ----------
     W, H, PAD = 1000, 300, 30
@@ -131,8 +139,22 @@ def render(v):
             h = 10 + 50 * x / smax
             drops.append(f'<g class=dr style="--d:{(i % 7) * .3:.1f}s"><rect x="{X(i)-3:.1f}" y="0" width="6" height="{h:.1f}" rx="3"/>'
                          f'<circle cx="{X(i):.1f}" cy="{h + 4:.1f}" r="3.2"/><title>{e(t)}: {x:.0f} MB pushed to disk</title></g>')
+    tc = [cause.get(t, "") for t in T]
+    CB, step_ = H + 118, W / max(n - 1, 1)
+    band, run_c, run_s = [], None, 0
+    for i in range(n + 1):
+        c_ = tc[i] if i < n else None
+        if c_ != run_c:
+            if run_c:
+                x0 = max(X(run_s) - step_ / 2, 0)
+                band.append(f'<rect class="cz {run_c}" x="{x0:.1f}" y="{CB}" width="{min(X(i - 1) + step_ / 2, W) - x0:.1f}" height="16">'
+                            f'<title>{e(T[run_s][11:])}{"–" + e(T[i - 1][11:]) if i - 1 > run_s else ""}: held up by {held(run_c)}</title></rect>')
+            run_c, run_s = c_, i
+    cpu_i = next((i for i, t in enumerate(T) if cpu_from and t >= cpu_from), None)
+    band_note = ("processors not measured yet" if cpu_i is None else
+                 f"processors measured from {T[cpu_i][11:]}" if cpu_i > 30 else "")
     series = json.dumps({"t": T, "need": [round(x, 2) for x in need], "ram": [round(x, 2) for x in U],
-                         "swap": [round(swap_by_t.get(t, 0)) for t in T]})
+                         "swap": [round(swap_by_t.get(t, 0)) for t in T], "cause": tc, "cn": CAUSE_NAMES})
 
     # ---------- panel 4: history as stacked buddy heads ----------
     days = [d for d in v["days"] if d >= min(day_sess)]
@@ -172,6 +194,27 @@ def render(v):
                          f'<title>{dt.date.fromisoformat(d).strftime("%a %-d %b")}: busiest minute needed {dmem[d][0]:.1f} GB at {dmem[d][1]}, {ov:.1f} GB more than the {TOTAL:.0f} GB this Mac has; {heavy.get(d, 0)} minutes of heavy swapping</title></g>')
         else:
             obars.append(f'<circle cx="{cx:.1f}" cy="4" r="1.6" fill="var(--mute)" opacity=".35"><title>{d}: memory not measured (the monitor started {since})</title></circle>')
+    dcause = {}
+    for t, c_ in cause.items():
+        if c_:
+            dc_ = dcause.setdefault(t[:10], {}); dc_[c_] = dc_.get(c_, 0) + 1
+    CY0, CHh = HH + OH + 64, OH * .8
+    cmax = max([sum(dcause.get(d, {}).values()) for d in days] + [30])
+    cbars = []
+    for i, d in enumerate(days):
+        dc_ = dcause.get(d, {})
+        if not dc_:
+            continue
+        y_, cx = 0, i * cw + cw / 2
+        segs = ""
+        for k_ in ("cpu", "both", "mem", "heat"):
+            if dc_.get(k_):
+                h_ = max(CHh * dc_[k_] / cmax, 1.5)
+                segs += f'<rect class="cz {k_}" x="{cx - cw*.35:.1f}" y="{y_:.1f}" width="{cw*.7:.1f}" height="{h_:.1f}"/>'
+                y_ += h_
+        unmeas = " (processors not measured yet that day)" if not cpu_from or d < cpu_from[:10] else ""
+        cbars.append(f'<g class=ob style="--i:{i}">{segs}<title>{dt.date.fromisoformat(d).strftime("%a %-d %b")}: held up for '
+                     + ", ".join(f"{dc_[k_]} min by {held(k_)}" for k_ in ("cpu", "both", "mem", "heat") if dc_.get(k_)) + f"{unmeas}</title></g>")
     meas = [d for d in days if d in dmem]
     over_days = sum(1 for d in meas if dmem[d][0] > TOTAL)
     worst_d = max(meas, key=lambda d: dmem[d][0]) if meas else None
@@ -347,7 +390,28 @@ def render(v):
                 hm.append(f'<rect x="{x_}" y="{y_}" width="{CW-2}" height="{CH-2}" rx="7" class=empty><title>{names[wd]} {h:02d}:00: no reading yet</title></rect>')
     for h in range(HRS[0], 24, 2):
         hm.append(f'<text x="{LX + (h - HRS[0])*CW + CW/2 - 1:.0f}" y="{TY - 8}" text-anchor=middle class=tk>{h:02d}:00</text>')
-    heat_svg = "".join(hm)
+    ccell = {}
+    for t, c_ in cause.items():
+        d_ = dt.datetime.strptime(t, "%Y-%m-%d %H:%M"); cc = ccell.setdefault((d_.weekday(), d_.hour), {})
+        cc["n"] = cc.get("n", 0) + 1
+        if c_:
+            cc[c_] = cc.get(c_, 0) + 1
+    hc2 = []
+    for wd in range(7):
+        for h in HRS:
+            cc = ccell.get((wd, h))
+            if not cc:
+                continue
+            x_, y_ = LX + (h - HRS[0])*CW, TY + wd*CH
+            hk = [k_ for k_ in ("cpu", "both", "mem", "heat") if cc.get(k_)]
+            if not hk:
+                hc2.append(f'<rect x="{x_}" y="{y_}" width="{CW-2}" height="{CH-2}" rx="7" class=cz0><title>{names[wd]} {h:02d}:00: nothing held it up ({cc["n"]} minutes)</title></rect>')
+                continue
+            dom = max(hk, key=cc.get); share = sum(cc[k_] for k_ in hk) / cc["n"]
+            hc2.append(f'<rect x="{x_}" y="{y_}" width="{CW-2}" height="{CH-2}" rx="7" style="fill:color-mix(in oklab,var(--c-{dom}) {30 + 70*share:.0f}%,var(--bg))">'
+                       f'<title>{names[wd]} {h:02d}:00: held up {share:.0%} of {cc["n"]} minutes, mostly by {held(dom)} ('
+                       + ", ".join(f"{held(k_)} {cc[k_]}" for k_ in hk) + ')</title></rect>')
+    heat_svg = "".join(hm) + f'<g class=hmc>{"".join(hc2)}</g>'
     heat_w, heat_h = LX + len(HRS)*CW + 4, TY + 7*CH + 6
     filled = sum(1 for (_, h) in cell if h in HRS)
 
@@ -375,16 +439,50 @@ def render(v):
     cpu_rows = []
     cp_ = os.path.join(v["HOME"], "cpu.csv")
     if os.path.exists(cp_):
-        cpu_rows = [l.strip().split(",") for l in open(cp_) if l.count(",") == 3]
-    cpu_work = sorted(float(r[1]) for r in cpu_rows if 7 <= int(r[0][11:13]) < 24)
-    cpu_p95 = cpu_work[int(.95 * (len(cpu_work) - 1))] if cpu_work else None
-    cpu_txt = (f"processor: 95% of working minutes used under {cpu_p95:.0f}% of its {cpu_rows[-1][3]} cores, so memory is the limit, not the chip." if cpu_p95 is not None and cpu_p95 < 70 and len(cpu_work) >= 60 else
-               f"processor: 95% of working minutes used under {cpu_p95:.0f}% of its {cpu_rows[-1][3]} cores." if cpu_p95 is not None and len(cpu_work) >= 60 else
-               "processor: measured from today, too few readings to judge yet.")
+        cpu_rows = list({r[0]: r for r in (l.strip().split(",") for l in open(cp_) if l.count(",") == 3)}.values())  # a reinstall can write a minute twice
+    # Processors: in how many working minutes would a chip with this many cores have kept up (load average <= cores)?
+    # Counts cores only. Newer chips' cores are faster than an older Mac's, so this overstates the need.
+    cores = int(cpu_rows[-1][3]) if cpu_rows else 0
+    loadw = [(r[0], float(r[2])) for r in cpu_rows if 7 <= int(r[0][11:13]) < 24]
+    cpu_ok = len(loadw) >= 60
+    CORE_LADDER = sorted({cores, 10, 12, 14, 16}) if cores else []
+    def cfits(c):
+        return sum(l_ <= c for _, l_ in loadw) / max(len(loadw), 1)
+    CHIP_COVER = .9   # the pick keeps up in 9 working minutes of 10: waiting work slows things down, it does not stall them
+    chip = next((c for c in CORE_LADDER if cfits(c) >= CHIP_COVER), None) if cpu_ok else cores
+    chip_up = cpu_ok and (chip is None or chip > cores)
+    chip_b = f"{chip} cores" if chip else f"{CORE_LADDER[-1]}+ cores"
+    cpu_days = len({t[:10] for t, _ in loadw if dt.date.fromisoformat(t[:10]).weekday() < 5})
+    wait_pct = 1 - cfits(cores) if cpu_ok else 0
+    cl_rows = ""
+    for k_, c in enumerate(CORE_LADDER):
+        f_ = cfits(c)
+        tag = " &middot; this Mac" if c == cores else " &middot; first pick" if c == chip else ""
+        cl_rows += (f'<div class="row cad{" me" if c == chip and chip_up else ""}" data-c="{c}" style="--i:{k_}"><span><b>{c} cores</b>{tag}</span>'
+                    f'<div class=track><b style="--w:{max(f_ * 100, 2):.0f}%"></b></div><em>{f_:.0%}</em></div>')
+    # The verdict: working minutes since the processors were first measured, by what held them up.
+    wc = [c_ for t, c_ in cause.items() if cpu_from and t >= cpu_from and 7 <= int(t[11:13]) < 24]
+    vn, vc = len(wc), {k_: wc.count(k_) for k_ in ("cpu", "both", "mem", "heat")}
+    cpu_first = vc["cpu"] > vc["mem"]
+    if vn >= 60:
+        seg = "".join(f'<i class="cz {k_}" style="width:{vc[k_] / vn * 100:.2f}%" title="{held(k_)}: {vc[k_]} minutes"></i>' for k_ in vc if vc[k_])
+        key = "".join(f'<span><i class="cz {k_}"></i>{held(k_)} <b>{vc[k_]:,} min</b> ({vc[k_] / vn:.0%})</span>' for k_ in vc)
+        big, small = ("processors", "memory") if cpu_first else ("memory", "processors")
+        why_txt = (f"The {big} held it up more often than the {small}. "
+                   + ("Processors count as holding it up when more work is waiting than its cores can run; memory when it pushes 100 MB a minute or more to disk. ")
+                   + ("Heat counts only when macOS slows the chip down to cool it, which has not happened yet." if not vc["heat"] else "Heat counts when macOS slowed the chip down to cool it."))
+        verdict = (f'<div class="c en verdict" id=rec-why style="--n:2"><small>What held it up, {vn:,} working minutes since '
+                   f'{dt.datetime.strptime(cpu_from, "%Y-%m-%d %H:%M").strftime("%-d %b")}</small>'
+                   f'<div class=vbar role=img aria-label="Processors {vc["cpu"]}, both {vc["both"]}, memory {vc["mem"]}, heat {vc["heat"]} of {vn} minutes">{seg}</div>'
+                   f'<div class="legend vkey">{key}</div><p class=note>{why_txt}</p></div>')
+    else:
+        verdict = ""
 
     lesson = lesson_html(TOTAL=TOTAL, work=work, wdays=wdays, work_nb=work_nb, fits=fits, LADDER=LADDER, peak_ever=peak_ever,
                          peak_ever_when=peak_ever_when, target=target, rec=rec, budget=budget, fit16=fit16, disk_used=disk_used,
-                         disk_txt=disk_txt, disk_rec=disk_rec, n_wd=n_wd, WD_GOAL=WD_GOAL)
+                         disk_txt=disk_txt, disk_rec=disk_rec, n_wd=n_wd, WD_GOAL=WD_GOAL,
+                         cpu=dict(ok=cpu_ok, cores=cores, chip=chip, chip_b=chip_b, up=chip_up, wait=wait_pct, days=cpu_days,
+                                  rows=[[c, round(cfits(c) * 100)] for c in CORE_LADDER]))
 
     # ---------- Busy hours: the takeaway ----------
     over_cells = sorted(((x, k) for k, x in wcell.items() if x > TOTAL), reverse=True)
@@ -455,8 +553,8 @@ var f=function(){{document.getAnimations().forEach(function(a){{if(a.effect&&a.e
 <link rel=icon href='data:image/svg+xml,{v["fav"]}'>
 <link rel=preconnect href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;600;800&family=Geist+Mono:wght@400;600&display=swap" rel=stylesheet>
 <style>
-:root{{--bg:#fff8dc;--fg:#1d2a44;--mute:#5f6b80;--card:rgba(255,255,255,.8);--line:rgba(47,111,181,.16);--tone:{v["tone"]};--hot:#e5484d;--good:#2f9e5b;--ram:#2f6fb5;--banana:#ffd93b;--fillA:#ffe680;--fillB:#ffd23b}}
-@media(prefers-color-scheme:dark){{:root:not([data-theme=light]){{--bg:#0e1a2f;--fg:#f4f1e6;--mute:#9aa6bb;--card:rgba(255,217,59,.06);--line:rgba(255,217,59,.15);--hot:#ff6b6f;--good:#4ade80;--ram:#7fb0ef;--fillA:rgba(255,217,59,.55);--fillB:rgba(255,217,59,.12)}}}}
+:root{{--bg:#fff8dc;--fg:#1d2a44;--mute:#5f6b80;--card:rgba(255,255,255,.8);--line:rgba(47,111,181,.16);--tone:{v["tone"]};--hot:#e5484d;--good:#2f9e5b;--ram:#2f6fb5;--banana:#ffd93b;--fillA:#ffe680;--fillB:#ffd23b;--c-cpu:#6e56cf;--c-mem:#e5484d;--c-both:#9b2d7f;--c-heat:#d98b06}}
+@media(prefers-color-scheme:dark){{:root:not([data-theme=light]){{--bg:#0e1a2f;--fg:#f4f1e6;--mute:#9aa6bb;--card:rgba(255,217,59,.06);--line:rgba(255,217,59,.15);--hot:#ff6b6f;--good:#4ade80;--ram:#7fb0ef;--fillA:rgba(255,217,59,.55);--fillB:rgba(255,217,59,.12);--c-cpu:#8a78ee;--c-mem:#f0545a;--c-both:#c0479f;--c-heat:#d99a1c}}}}
 *{{box-sizing:border-box;margin:0}}
 html,body{{height:100%}}
 body{{background:var(--bg);color:var(--fg);font:16px/1.5 Geist,-apple-system,sans-serif;overflow:hidden}}
@@ -520,6 +618,14 @@ svg.ts{{width:100%;height:auto;display:block;overflow:visible;touch-action:pan-y
 .chartbox:hover .tip,.chartbox.touch .tip{{opacity:1}}
 .legend{{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--mute);font-size:13px}} .legend i{{display:inline-block;width:14px;height:4px;border-radius:2px;margin-right:6px;vertical-align:3px}}
 .two{{display:grid;grid-template-columns:2fr 1fr;gap:14px;align-items:start}}
+/* what held it up: one colour per cause, the same on every tab */
+.cz.cpu{{fill:var(--c-cpu);background:var(--c-cpu)}} .cz.mem{{fill:var(--c-mem);background:var(--c-mem)}} .cz.both{{fill:var(--c-both);background:var(--c-both)}} .cz.heat{{fill:var(--c-heat);background:var(--c-heat)}}
+.czb{{fill:color-mix(in srgb,var(--ram) 6%,transparent)}} .cz0{{fill:color-mix(in srgb,var(--ram) 8%,transparent)}}
+.legend i.cz{{width:12px;height:12px;border-radius:3px;vertical-align:-1px}} .tip i.cz{{border-radius:3px}}
+.verdict{{margin:4px 0 14px}} .vbar{{display:flex;height:22px;border-radius:8px;overflow:hidden;background:color-mix(in srgb,var(--ram) 10%,transparent);margin:10px 0 8px;gap:2px}}
+.vbar i{{display:block;height:100%}} .vkey b{{color:var(--fg)}}
+.ladders{{display:flex;flex-direction:column;gap:18px}} .ladders.cpufirst .lcpu{{order:-1}}
+#p-hours .hmc,#p-hours .hleg-cause,#p-hours .hl-cause{{display:none}} #p-hours.bycause .hmc,#p-hours.bycause .hl-cause{{display:inline}} #p-hours.bycause .hleg-cause{{display:flex}} #p-hours.bycause .hleg-mem,#p-hours.bycause .hl-mem,#p-hours.bycause .hc circle{{display:none}}
 .list{{margin-top:10px;display:grid;gap:7px}}
 .jtabs{{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}} .jt{{font:600 13px Geist,sans-serif;border:2px solid var(--line);background:transparent;border-radius:99px;padding:5px 14px;cursor:pointer;color:inherit}} .jt[aria-pressed=true]{{background:#1f2a44;color:#fff;border-color:#1f2a44}}
 .jobs .jr{{grid-template-columns:minmax(0,17rem) 1fr 5.5rem}} .jobs .list{{max-height:52vh;overflow:auto;padding-right:4px}} details.kind summary{{list-style:none;cursor:pointer}} details.kind summary::-webkit-details-marker{{display:none}} details.kind summary .jr span b::before{{content:"\\25B8  ";color:var(--mute)}} details.kind[open] summary .jr span b::before{{content:"\\25BE  "}}
@@ -567,7 +673,7 @@ svg.jars{{width:100%;max-height:28vh;display:block;overflow:visible}}
 .glass{{fill:color-mix(in srgb,var(--card) 60%,transparent);stroke:var(--fg);stroke-width:3;opacity:.9}}
 .lid{{fill:var(--ram)}} .fill{{fill:url(#jf);transform-origin:bottom;transform-box:fill-box}}
 .jlabel{{font:700 22px Fredoka,sans-serif;fill:var(--fg)}} .jtag{{font:600 15px Fredoka,sans-serif}} .jtag.bad{{fill:var(--hot)}} .jtag.good{{fill:var(--good)}}
-.specs{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}
+.specs{{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:12px}}
 .specs .c{{padding:12px 16px}} .specs .c b{{display:block;font:700 24px/1.1 Fredoka,sans-serif}} .specs .c span{{font-size:13.5px;color:var(--mute)}}
 .specs .c:first-child{{background:var(--fg);color:var(--bg);border-color:var(--fg)}} .specs .c:first-child b{{color:#ffd93b}} .specs .c:first-child span{{color:inherit;opacity:.8}}
 footer{{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 20px 12px;max-width:1240px;width:100%;margin:0 auto;color:var(--mute);font-size:12px}}
@@ -616,24 +722,29 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <pattern id=hatch width=10 height=10 patternUnits=userSpaceOnUse patternTransform="rotate(45)"><rect width=10 height=10 fill="var(--hot)" opacity=".16"/><line x1=0 y1=0 x2=0 y2=10 stroke="var(--hot)" stroke-width=3 opacity=".5"/></pattern>
 </defs></svg>
 <div class=app>
-<header><div class=brand><i></i>{"Too small a Mac" if rec > TOTAL else "Mac memory check"}</div><nav class=tabs role=tablist aria-label="Sections">{tab_html}<span class=ink></span><svg class=rider viewBox="0 0 60 92" aria-hidden=true>{mini(30, 90, 90)}</svg></nav><span class=live title="Memory written out to the disk in the last minute">{out_mb:.0f} MB/min<span class=lx> to disk</span></span></header>
+<header><div class=brand><i></i>{"Too small a Mac" if rec > TOTAL or chip_up else "Mac memory check"}</div><nav class=tabs role=tablist aria-label="Sections">{tab_html}<span class=ink></span><svg class=rider viewBox="0 0 60 92" aria-hidden=true>{mini(30, 90, 90)}</svg></nav><span class=live title="Memory written out to the disk in the last minute">{out_mb:.0f} MB/min<span class=lx> to disk</span></span></header>
 <div class=stage>
 
 <section class=panel id=p-rec role=tabpanel><div class=inner>
 <section class=hero>
 <p class="kick en">My work has needed up to {peak_ever:.1f} GB of memory. This Mac has {TOTAL:.0f}.</p>
-<h1 class=en id=rec-h1>{f"Get <em>{rec} GB</em> of memory<br>and {disk_txt} of storage." if rec > TOTAL else f"This Mac&#x27;s <em>{TOTAL:.0f} GB</em> is enough<br>for now."}</h1>
+<h1 class=en id=rec-h1>{(f"Get <em>{rec} GB</em> of memory,<br>a chip with {chip_b}<br>and {disk_txt} of storage." if chip_up else f"Get <em>{rec} GB</em> of memory<br>and {disk_txt} of storage.") if rec > TOTAL else (f"This Mac&#x27;s memory is enough;<br>the processors want <em>{chip_b}</em>." if chip_up else f"This Mac&#x27;s <em>{TOTAL:.0f} GB</em> is enough<br>for now.")}</h1>
+{f'<p class="note en" style="margin:4px 0 0">The chip is a first guess from {cpu_days} working day{"s" if cpu_days != 1 else ""} of processor readings; memory and storage rest on {n_wd}.</p>' if chip_up else ""}
 {lesson}
 </section>
+{verdict}
 <div class=two>
-<div class="c en" style="--n:2"><small>Share of working minutes each size would have handled</small><div class="list ladder">{ladder}</div>
+<div class="c en ladders{" cpufirst" if cpu_first and cpu_ok else ""}" style="--n:2"><div class=lmem><small>Memory: share of working minutes each size would have handled</small><div class="list ladder meml">{ladder}</div>
 <p class=note id=rec-note style="margin-top:10px">{len(work):,} working minutes, 7am to midnight{f'; the small &ldquo;without&rdquo; figures take out the hidden test browsers Claude opens, and cover only minutes since {split_t}, when those were first measured apart' if work_nb else ''}.</p></div>
+{f"""<div class=lcpu id=rec-cpu><small>Processors: share of working minutes a chip with this many cores would have kept up</small><div class="list ladder cpul">{cl_rows}</div>
+<p class=note style="margin-top:10px">{len(loadw):,} working minutes on {cpu_days} working day{"s" if cpu_days != 1 else ""}, so this is a first guess. It counts cores only; newer chips&#x27; cores are faster than this Mac&#x27;s, so it overstates what you need.</p></div>""" if cpu_ok else ""}</div>
 <div class="c en" id=rec-jars style="--n:3"><svg class=jars viewBox="0 -60 1000 440" role=img aria-label="A {TOTAL:.0f} GB jar holding the busiest minute's {peak_ever:.1f} GB, next to a {rec} GB jar holding it with room to spare">{jars}</svg></div>
 </div>
 <div class=specs>
 <div class="c en" id=rec-mem style="--n:4"><b>{rec} GB</b><span>memory, or {budget} GB if budget is tight: enough today, little room to grow.</span></div>
+{f'<div class="c en" id=rec-chip style="--n:5"><b>{chip_b}</b><span>processor, a first guess from {cpu_days} working day{"s" if cpu_days != 1 else ""}: more work was waiting than its {cores} cores could run in {wait_pct:.0%} of working minutes.</span></div>' if cpu_ok else ""}
 <div class="c en" id=rec-disk style="--n:5"><b>{disk_txt}</b><span>storage: {disk_used:.0f} GB of this Mac&#x27;s {disk_total:.0f} GB is in use, plus half again for growth.</span></div>
-<div class="c en" id=rec-days style="--n:6"><b>{n_wd} of {WD_GOAL}</b><span>working days measured so far. {e(cpu_txt[0].upper() + cpu_txt[1:])}</span></div>
+<div class="c en" id=rec-days style="--n:6"><b>{n_wd} of {WD_GOAL}</b><span>working days measured so far{f"; the processors on {cpu_days}" if cpu_rows else ""}.</span></div>
 </div>
 </div></section>
 
@@ -642,7 +753,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <p class="lede en" style="--n:1">The red line is everything the Mac is holding. Above the dotted {TOTAL:.0f} GB line it no longer fits, so the striped part sits on the disk, and the drops underneath are the minutes it was busy moving memory out. Hover to read any minute.</p>
 <div class=two>
 <div class="c chartbox en" style="--n:2" id=chart>
-<svg class=ts viewBox="0 -30 {W} {H + 120}" role=img aria-label="Memory needed per minute against the {TOTAL:.0f} GB the Mac has">
+<svg class=ts viewBox="0 -30 {W} {H + 170}" role=img aria-label="Memory needed per minute against the {TOTAL:.0f} GB the Mac has">
 <clipPath id=above><rect x=0 y=-40 width={W} height={ram_y + 40:.1f} /></clipPath><clipPath id=below><rect x=0 y={ram_y:.1f} width={W} height={H} /></clipPath>
 <polygon class=under points="{area}" clip-path="url(#below)"/>
 <polygon class=over points="{area}" clip-path="url(#above)"/>
@@ -660,26 +771,32 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <g class=drops transform="translate(0 {H + 30})">{"".join(drops)}</g>
 <text x=0 y={H + 104} class=tk>Drops: minutes it pushed memory to disk (worst: {LO[lpk]:.0f} MB at {e(swap_when)})</text>
 <g class=peek>{mini(W - 34, H + 2, 46, flip=True, mood=mood)}</g>
+<rect class=czb x=0 y={CB} width={W} height=16 rx=4 />{"".join(band)}
+<text x=0 y={CB + 36} class=tk>What held it up, minute by minute (blank: nothing did){(" &middot; " + band_note) if band_note else ""}</text>
 </svg>
 <div class=tip id=tip></div>
 </div>
 <div class="c en" style="--n:3"><small>What held the memory at today&#x27;s busiest minute, {e(peak_when)}</small><div class=list>{bars(peak_d, peak_t)}</div></div>
 </div>
 <div class="legend en" style="--n:4"><span><i style="background:var(--hot)"></i>memory needed (in RAM + parked on disk)</span><span><i style="background:var(--ram)"></i>in RAM</span><span><i style="background:repeating-linear-gradient(45deg,var(--hot) 0 2px,transparent 2px 5px)"></i>overflow onto disk</span><span>{swap_mins} minutes swapping, {heavy_mins} of them heavy</span></div>
+<div class="legend en" style="--n:5">{CAUSE_KEY}</div>
 </div></section>
 
 {heat_sec}
 <section class=panel id=p-days role=tabpanel><div class=inner>
 <div class=en><p class=kick>Every day since {first.strftime("%-d %B")}</p><h2 class=big>Over {TOTAL:.0f} GB on <em>{over_days} of {len(meas)}</em> measured days</h2></div>
-<p class="lede en" style="--n:1">Above the line: how many Claude Code sessions ran at once, one head each. {busy_days} days reached 10 or more. Below the line: how far that day's busiest minute went past {TOTAL:.0f} GB. Memory has only been measured since {since}.</p>
-<div class="c en" style="--n:2"><svg class=hist style="max-height:44vh" viewBox="0 -24 {HW} {HH + OH + 76}" role=img aria-label="One timeline: Claude Code sessions open at once each day above, memory over this Mac's RAM below">
+<p class="lede en" style="--n:1">Above the line: how many Claude Code sessions ran at once, one head each. {busy_days} days reached 10 or more. Below the line: how far that day's busiest minute went past {TOTAL:.0f} GB, and under that, how many minutes something held the Mac up, coloured by what. Memory has only been measured since {since}.</p>
+<div class="c en" style="--n:2"><svg class=hist style="max-height:52vh" viewBox="0 -24 {HW} {CY0 + CHh + 46:.0f}" role=img aria-label="One timeline: Claude Code sessions open at once each day above, memory over this Mac's RAM below">
 <text x=4 y=-12 class=tk>&#9650; Claude Code sessions at once (from my session logs)</text>
 <line x1=0 x2={HW} y1={ten_y:.1f} y2={ten_y:.1f} stroke="var(--hot)" stroke-dasharray="2 7" stroke-width=2 stroke-linecap=round opacity=".7"/>
 <text x=4 y={ten_y - 8:.1f} class=tk>10 at once</text>
 {"".join(heads)}{hticks}
 <line x1=0 x2={HW} y1={HH + 30:.1f} y2={HH + 30:.1f} stroke="var(--line)" stroke-width="2"/>
 <g transform="translate(0 {HH + 34:.1f})">{"".join(obars)}</g>
-<text x=4 y={HH + OH + 48:.1f} class=tk>&#9660; Memory over {TOTAL:.0f} GB at the busiest minute (measured from {since}; dots = not measured)</text></svg>
+<text x=4 y={HH + OH + 48:.1f} class=tk>&#9660; Memory over {TOTAL:.0f} GB at the busiest minute (measured from {since}; dots = not measured)</text>
+<g transform="translate(0 {CY0:.1f})">{"".join(cbars)}</g>
+<text x=4 y={CY0 + CHh + 26:.1f} class=tk>&#9660; Minutes held up, coloured by what held it up{f" (processors measured from {dt.datetime.strptime(cpu_from, '%Y-%m-%d %H:%M').strftime('%-d %b')})" if cpu_from else ""}</text></svg>
+<div class=legend style="margin-top:8px">{CAUSE_KEY}</div>
 <ol class="top meas">{"".join(f'<li><b>+{max(dmem[d][0] - TOTAL, 0):.1f} GB</b><span>over {TOTAL:.0f} GB &middot; {day_sess.get(d, (0, ""))[0]} sessions<br><i>{dt.date.fromisoformat(d).strftime("%a %-d %b")} &middot; {heavy.get(d, 0)} min heavy swapping</i></span></li>' for d in sorted(meas, reverse=True))}</ol>
 <p class=note>Measured since {since}: {over_days} of {len(meas)} days went over {TOTAL:.0f} GB{f", the worst by {dmem[worst_d][0] - TOTAL:.1f} GB on {dt.date.fromisoformat(worst_d).strftime('%a %-d %b')} with {heavy.get(worst_d, 0)} minutes of heavy swapping" if worst_d else ""}. Earlier days were not measured (faint dots); their session counts above are the only record.</p></div>
 <div class=en style="--n:3"><p class=kick style="margin-bottom:8px">Busiest days</p><ol class=top>{top_html}</ol></div>
@@ -687,9 +804,11 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 
 <section class=panel id=p-hours role=tabpanel><div class=inner>
 <div class=en><p class=kick>Working hours, 7am to midnight</p><h2 class=big>{TOTAL:.0f} GB ran out in <em>{len(over_cells)} of {filled}</em> hours seen</h2></div>
-<p class="lede en" style="--n:1">{hours_take} Each square is one hour of one weekday, darker for more memory needed; a white dot means it went over {TOTAL:.0f} GB. Blank squares have no readings yet.</p>
-<div class="c en" style="--n:2"><svg class=heat viewBox="0 0 {heat_w} {heat_h}" role=img aria-label="Highest memory needed by weekday and hour">{heat_svg}</svg>
-<div class=legend style="margin-top:12px"><span>lighter = less</span><span class=ramp></span><span>darker = more ({lo_:.0f} to {hi_:.0f} GB)</span><span><i style="background:#fff;border:2px solid var(--hot);width:10px;height:10px;border-radius:50%;vertical-align:-1px"></i>over {TOTAL:.0f} GB</span></div></div>
+<p class="lede en" style="--n:1"><span class=hl-mem>{hours_take} Each square is one hour of one weekday, darker for more memory needed; a white dot means it went over {TOTAL:.0f} GB.</span><span class=hl-cause>Each square is one hour of one weekday, coloured by what held it up most in that hour; paler means fewer of its minutes were held up.</span> Blank squares have no readings yet.</p>
+<div class="c en hmcard" style="--n:2"><div class=jtabs role=group aria-label="Colour the squares by"><button type=button class="jt hmt" data-hm=mem aria-pressed=true>Memory needed</button><button type=button class="jt hmt" data-hm=cause aria-pressed=false>What held it up</button></div>
+<svg class=heat viewBox="0 0 {heat_w} {heat_h}" role=img aria-label="Highest memory needed by weekday and hour, or what held each hour up">{heat_svg}</svg>
+<div class="legend hleg-cause" style="margin-top:12px">{CAUSE_KEY}<span>paler = held up for fewer of its minutes</span>{f"<span>processors measured from {dt.datetime.strptime(cpu_from, '%Y-%m-%d %H:%M').strftime('%-d %b')}; before that only memory could show</span>" if cpu_from else ""}</div>
+<div class="legend hleg-mem" style="margin-top:12px"><span>lighter = less</span><span class=ramp></span><span>darker = more ({lo_:.0f} to {hi_:.0f} GB)</span><span><i style="background:#fff;border:2px solid var(--hot);width:10px;height:10px;border-radius:50%;vertical-align:-1px"></i>over {TOTAL:.0f} GB</span></div></div>
 </div></section>
 
 <section class=panel id=p-uses role=tabpanel><div class=inner>
@@ -697,7 +816,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <div class=whogrid>
 <div class=en style="--n:1"><!--YARD--></div>
 <div class="c en jobs" style="--n:2"><div class=jtabs role=group aria-label="Time window">{uses_tabs}</div>{uses_views}
-<p class=note style="margin-top:10px">Tap a Claude row to see its groups and the scripts in each, with the session folder that started them.{f" Could be saved without new hardware: the hidden test browsers peaked at {br_peak:.1f} GB this week." if br_peak >= 1 else ""}</p></div>
+<p class=note style="margin-top:10px">Tap a Claude row to see its groups and the scripts in each, with the session folder that started them.{f" The hidden test browsers peaked at {br_peak:.1f} GB this week." if br_peak >= 1 else ""}</p></div>
 </div></div></section>
 
 <section class=panel id=p-claude role=tabpanel><div class=inner>
@@ -711,8 +830,10 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <div class="c en howc" style="--n:1"><ul>
 <li><b>Every minute</b> a background job reads macOS figures (<code>vm_stat</code>, <code>sysctl</code>, <code>ps</code>) into <code>~/memlog/</code>{', copied to Google Drive every 15 minutes' if cfg.get('drive_backup') else ''}: memory in use, memory on disk, memory per app, the scripts Claude runs, and processor load. Nothing is sent anywhere else.</li>
 <li><b>Memory needed</b> is memory in use plus memory parked on disk (swap). Swap can keep old data from hours earlier, so this can overstate the real need; the minutes the Mac was actively moving memory to disk are shown separately as the drops on the Today chart.</li>
-<li><b>The recommendation</b> is the busiest minute ever measured plus a quarter, rounded up to a size Macs come in. The budget pick is the smallest size that would have covered 99% of working minutes. Storage is what is in use now plus half again.</li>
-<li><b>Hot &amp; slow</b> reads, each minute and without admin rights: the hottest processor temperature sensor and the fan speed (from a small Swift program, <code>heat</code>, built at install), macOS&#x27;s graphics load (<code>ioreg</code>), disk bytes read and written (<code>ioreg</code>), network bytes in and out (<code>netstat</code>) and each app&#x27;s share of the processors (<code>ps</code>). It also records macOS&#x27;s own heat level; when that goes above normal, macOS is slowing the Mac down to cool it, and the temperature tile says so. The dotted lines (90 &deg;C, fan at 60%, 85% busy, 1 GB a minute of disk, 100 MB a minute pushed to disk, 500 MB a minute of network) are rules of thumb, not limits macOS enforces.</li>
+<li><b>The recommendation</b> is the busiest minute ever measured plus a quarter, rounded up to a size Macs come in. The budget pick is the smallest size that would have covered 99% of working minutes. Storage is what is in use now plus half again. The processor pick is the smallest core count that would have kept up in 9 working minutes of 10; it counts cores only, and newer chips&#x27; cores are faster than an older Mac&#x27;s, so it overstates the need.</li>
+<li><b>Processors</b> are measured as work waiting: the 1-minute load average divided by the number of cores. Above 1&times;, more work is waiting than the cores can run, so things slow down. &ldquo;% busy&rdquo; is not used for this because on Apple chips half the cores are slower ones: the fast half can be full while the total reads 50 to 60%.</li>
+<li><b>What held it up</b> labels each minute, the same way on every tab: <i>processors</i> when work is waiting, <i>memory</i> when it pushes 100 MB a minute or more to disk, <i>memory and processors</i> when both happen in the same minute, and <i>heat</i> when macOS&#x27;s own heat level is fair or worse, meaning it is slowing the chip down to cool it (heat wins over the others then, because it is what made the processors slower). A hot chip and a loud fan alone do not count: they make the Mac loud, not slow.</li>
+<li><b>Hot &amp; slow</b> reads, each minute and without admin rights: the hottest processor temperature sensor and the fan speed (from a small Swift program, <code>heat</code>, built at install), macOS&#x27;s graphics load (<code>ioreg</code>), disk bytes read and written (<code>ioreg</code>), network bytes in and out (<code>netstat</code>) and each app&#x27;s share of the processors (<code>ps</code>). It also records macOS&#x27;s own heat level; when that goes above normal, macOS is slowing the Mac down to cool it, and the temperature tile says so. The dotted lines (90 &deg;C, fan at 60%, work waiting above 1&times; the cores, graphics 85% busy, 1 GB a minute of disk, 100 MB a minute pushed to disk, 500 MB a minute of network) are rules of thumb, not limits macOS enforces.</li>
 <li><b>Per-app memory</b> counts memory still in memory, not on disk. Memory two apps share can be counted twice. Meet is counted inside Chrome.</li>
 <li>{f'<b>Before {e(split_t)}</b> Chrome and the hidden test browsers Claude opens were counted together; those readings say so. ' if any('not split' in g for d_ in apps_all.values() for g in d_) else ''}Claude&#x27;s scripts are tracked from {e(tfirst or "now")}, processor load from {e(cpu_rows[0][0] if cpu_rows else "now")}.</li>
 <li><b>Session history</b> before {since} comes from Claude Code transcripts: a session counts as open while its messages are under 30 minutes apart. Codex and idle open sessions are not counted, so real numbers were probably higher.</li>
@@ -771,7 +892,13 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
     if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(e.key)) {{ e.preventDefault(); go(1); }}
     if (["ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) {{ e.preventDefault(); go(-1); }}
   }});
-  document.querySelectorAll(".jt").forEach(b => b.addEventListener("click", () => {{
+  document.querySelectorAll(".hmt").forEach(b => b.addEventListener("click", () => {{
+    const card = b.closest(".panel"); card.classList.toggle("bycause", b.dataset.hm === "cause");
+    card.querySelectorAll(".hmt").forEach(x => x.setAttribute("aria-pressed", x === b));
+    try {{ localStorage.setItem("mm-hours-by", b.dataset.hm); }} catch (_) {{}}
+  }}));
+  try {{ if (localStorage.getItem("mm-hours-by") === "cause") document.querySelector('.hmt[data-hm="cause"]')?.click(); }} catch (_) {{}}
+  document.querySelectorAll(".jobs .jt").forEach(b => b.addEventListener("click", () => {{
     const box = b.closest(".jobs"), key = "mm-win-" + b.closest(".panel").id;
     box.querySelectorAll(".jt").forEach(x => x.setAttribute("aria-pressed", x === b));
     box.querySelectorAll(".jv").forEach(v => v.hidden = v.dataset.v !== b.dataset.v);
@@ -803,7 +930,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
     const r = svg.getBoundingClientRect(), b = box.getBoundingClientRect(), vb = svg.viewBox.baseVal;
     tip.style.left = (r.left - b.left + (X(i) - vb.x) * r.width / vb.width) + "px";
     tip.style.top = (r.top - b.top + (Y(D.need[i]) - vb.y - 40) * r.height / vb.height) + "px";
-    tip.innerHTML = `<b>${{D.t[i].slice(5).replace("-", "/")}}</b><br><i style="background:var(--hot)"></i>needed ${{D.need[i].toFixed(1)}} GB<br><i style="background:var(--ram)"></i>in RAM ${{D.ram[i].toFixed(1)}} GB<br>${{D.swap[i] ? D.swap[i] + " MB pushed to disk" : "no swapping this minute"}}`;
+    tip.innerHTML = `<b>${{D.t[i].slice(5).replace("-", "/")}}</b><br><i style="background:var(--hot)"></i>needed ${{D.need[i].toFixed(1)}} GB<br><i style="background:var(--ram)"></i>in RAM ${{D.ram[i].toFixed(1)}} GB<br>${{D.swap[i] ? D.swap[i] + " MB pushed to disk" : "no swapping this minute"}}<br>${{D.cause[i] ? `<i class="cz ${{D.cause[i]}}"></i>held up by ${{D.cn[D.cause[i]]}}` : "nothing held it up"}}`;
   }};
   const pick = ev => {{
     const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
@@ -823,7 +950,7 @@ let seen = false; try {{ seen = sessionStorage.getItem("mm-seen") === "1"; sessi
 # ---------- Recommendation: the buddy teaches how it got to the answer ----------
 # Every number comes from the readings. Steps that do not apply to this Mac are left out.
 def lesson_html(*, TOTAL, work, wdays, work_nb, fits, LADDER, peak_ever, peak_ever_when, target, rec, budget, fit16,
-                disk_used, disk_txt, disk_rec, n_wd, WD_GOAL):
+                disk_used, disk_txt, disk_rec, n_wd, WD_GOAL, cpu):
     def row(sz):
         return f".lad[data-sz='{sz}']" if sz in LADDER else ""
     me = int(round(TOTAL))
@@ -843,7 +970,7 @@ def lesson_html(*, TOTAL, work, wdays, work_nb, fits, LADDER, peak_ever, peak_ev
         nb = fits(me, work_nb)
         if nb >= fit16 + .05:
             steps.append((row(me), f"Without the hidden test browsers Claude opens, {TOTAL:.0f} GB would have been enough "
-                                   f"<b>{nb:.0%} of the time</b>. Closing those is free; more memory is not.",
+                                   f"<b>{nb:.0%} of the time</b>. They are part of the work, so my answer still counts them.",
                           "nobrowsers", {"sz": me, "pct": round(fit16 * 100), "nb": round(nb * 100)}))
     if rec > TOTAL and budget != rec and budget > TOTAL:
         steps.append((row(budget), f"<b>{budget} GB</b> would have covered 99% of minutes. That is the budget pick: "
@@ -854,13 +981,24 @@ def lesson_html(*, TOTAL, work, wdays, work_nb, fits, LADDER, peak_ever, peak_ev
                   f"For my answer I take the busiest minute, {peak_ever:.1f} GB, and add a quarter for a heavier week: {target:.1f} GB. "
                   + (f"The next size Macs come in is <b>{rec} GB</b>." if rec > TOTAL else f"This Mac already has <b>{TOTAL:.0f} GB</b>."),
                   "measure", {"jar": jar_i, "cap": cap, "a": round(peak_ever, 1), "b": round(target, 1)}))
+    if cpu["ok"]:
+        cd = cpu["days"]
+        steps.append(("#rec-cpu", f"Then the processors. More work was waiting than this Mac&#x27;s {cpu['cores']} cores could run in "
+                                  f"<b>{cpu['wait']:.0%} of working minutes</b> (some of them while memory was stuck too). "
+                                  + (f"A chip with <b>{cpu['chip']} cores</b> would have kept up 9 minutes in 10. " if cpu["chip"] and cpu["up"] else
+                                     f"Even {cpu['chip_b'][:-7]} cores would not have kept up 9 minutes in 10. " if cpu["up"] else
+                                     "This chip kept up 9 minutes in 10, so it is enough. ")
+                                  + f"That is from {cd} working day{'s' if cd != 1 else ''}, so it is a first guess.",
+                      "cores", {"rows": cpu["rows"], "pick": cpu["chip"] if cpu["up"] else 0}))
     steps.append(("#rec-disk", f"Storage: <b>{disk_used:.0f} GB</b> is in use now. Half again for growth makes "
                                f"{disk_used * 1.5:.0f} GB, so <b>{disk_txt}</b>.",
                   "disk", {"used": round(disk_used), "need": round(disk_used * 1.5), "cap": disk_rec, "label": disk_txt}))
     steps.append(("#rec-days", f"I have measured {n_wd} of {WD_GOAL} working days so far. A busier week could change this, "
                                "so keep me running.", "days", {"n": n_wd, "goal": WD_GOAL}))
-    steps.append(("#rec-h1", f"So: <b>{rec} GB</b> of memory and <b>{disk_txt}</b> of storage." if rec > TOTAL else
-                             f"So: this Mac&#x27;s <b>{TOTAL:.0f} GB</b> is enough for now. Look again after a busy week.",
+    chip_s = f", a chip with <b>{cpu['chip_b']}</b>" if cpu["ok"] and cpu["up"] else ""
+    steps.append(("#rec-h1", f"So: <b>{rec} GB</b> of memory{chip_s} and <b>{disk_txt}</b> of storage." if rec > TOTAL else
+                             (f"So: this Mac&#x27;s memory is enough, but it needs a chip with <b>{cpu['chip_b']}</b>." if chip_s else
+                              f"So: this Mac&#x27;s <b>{TOTAL:.0f} GB</b> is enough for now. Look again after a busy week."),
                   "sum", {}))
     n = len(steps)
     items = "".join(f'<li data-t="{t}" data-scene="{sc}" data-d=\'{json.dumps(d)}\'{" class=on" if k == 0 else ""}>'
@@ -994,7 +1132,7 @@ LESSON_JS = r"""<script>
   const NS = "http://www.w3.org/2000/svg", wide = () => !matchMedia("(max-width: 760px)").matches;
   const jarsCard = document.getElementById("rec-jars"), jarSvg = jarsCard && jarsCard.querySelector("svg");
   const lad = sz => P.querySelector(`.lad[data-sz='${sz}']`);
-  P.querySelectorAll(".lad").forEach(r => { const b = r.querySelector(".track b"); r.dataset.w = b.style.getPropertyValue("--w"); r.dataset.em = r.querySelector("em").textContent; });
+  P.querySelectorAll(".lad,.cad").forEach(r => { const b = r.querySelector(".track b"); r.dataset.w = b.style.getPropertyValue("--w"); r.dataset.em = r.querySelector("em").textContent; });
   let ST = [];
   const later = (f, ms) => ST.push(setTimeout(f, calm ? 0 : ms));
   const count = (el, from, to, ms, fmt) => { if (calm) { el.textContent = fmt(to); return; } const t0 = performance.now();
@@ -1018,11 +1156,11 @@ LESSON_JS = r"""<script>
     P.querySelectorAll(".sc-lead,.sc-pop,.sc-back,.sc-slam").forEach(e => e.classList.remove("sc-lead", "sc-pop", "sc-back", "sc-slam"));
     P.querySelectorAll(".sc-x").forEach(e => e.remove()); jarSvg && jarSvg.querySelector(".sc-meas")?.remove();
     if (jarsCard) { jarsCard.style.transform = ""; jarsCard.classList.remove("sc-fwd"); }
-    P.querySelectorAll(".lad").forEach(r => { const b = r.querySelector(".track b"); b.style.transition = ""; b.style.setProperty("--w", r.dataset.w); r.querySelector("em").textContent = r.dataset.em; });
+    P.querySelectorAll(".lad,.cad").forEach(r => { const b = r.querySelector(".track b"); b.style.transition = ""; b.style.setProperty("--w", r.dataset.w); r.querySelector("em").textContent = r.dataset.em; });
     const note = document.getElementById("rec-note"); if (note && note.dataset.t) note.innerHTML = note.dataset.t;
   };
   const SC = {
-    minutes(d) { const card = P.querySelector(".ladder").closest(".c"), note = document.getElementById("rec-note");
+    minutes(d) { const card = P.querySelector(".ladder.meml").closest(".c"), note = document.getElementById("rec-note");
       dim("sc-on"); lead(card);
       P.querySelectorAll(".lad").forEach((r, k) => fill(r, parseInt(r.dataset.em), 120 + k * 90));
       note.dataset.t = note.innerHTML; const n = d.n.toLocaleString("en-GB");
@@ -1039,7 +1177,7 @@ LESSON_JS = r"""<script>
       const t = r.querySelector(".track");
       const gh = add(t, `<span class=sc-tag>with Claude's test browsers closed: ${d.nb}%</span>`, "sc-ghost"); gh.style.left = d.pct + "%"; gh.style.width = (d.nb - d.pct) + "%";
       if (d.nb < 100) later(() => add(t, "", "sc-disk").style.left = d.nb + "%", 900); },
-    budget(d) { const r = lad(d.sz); if (!r) return; const lc = P.querySelector(".ladder"), tr = [...lc.querySelectorAll(".track")];
+    budget(d) { const r = lad(d.sz); if (!r) return; const lc = P.querySelector(".ladder.meml"), tr = [...lc.querySelectorAll(".track")];
       dim("sc-on", "sc-soft"); lead(r.closest(".c"), r);
       const a = tr[0].getBoundingClientRect(), z = tr[tr.length - 1].getBoundingClientRect(), o = lc.getBoundingClientRect(); lc.style.position = "relative";
       const ln = add(lc, "<span class=sc-tag>99% of minutes</span>", "sc-line");
@@ -1057,6 +1195,10 @@ LESSON_JS = r"""<script>
       later(() => { m.querySelector(".m1").classList.add("on"); m.querySelector(".t1").classList.add("on"); }, 1400);
       later(() => { const l = m.querySelector(".m2"); l.classList.add("on"); l.setAttribute("y1", y(d.b)); l.setAttribute("y2", y(d.b)); m.querySelector(".t2").classList.add("on"); }, 2600);
       later(() => m.querySelector(".t3").classList.add("on"), 3900); },
+    cores(d) { const box = document.getElementById("rec-cpu"); if (!box) return; const pick = d.pick && P.querySelector(`.cad[data-c='${d.pick}']`);
+      dim("sc-on", "sc-rows"); lead(box.closest(".c"), ...(pick ? [pick] : [...box.querySelectorAll(".cad")]));
+      d.rows.forEach(([c, p], k) => { const r = P.querySelector(`.cad[data-c='${c}']`); if (r) fill(r, p, 200 + k * 160); });
+      if (pick) later(() => document.getElementById("rec-chip")?.classList.add("sc-pop"), 1400); },
     disk(d) { const c = document.getElementById("rec-disk"); if (!c) return; dim("sc-on"); lead(c);
       const w = v => Math.min(v / d.cap * 100, 100).toFixed(1) + "%";
       add(c, `<div class=sc-gauge><i class=h style="width:${w(d.need)};animation-delay:.9s"></i><i class=u style="width:${w(d.used)}"></i></div>`
@@ -1065,7 +1207,7 @@ LESSON_JS = r"""<script>
       add(c, `<div>${d.n} of ${d.goal} working days measured</div><div class=sc-days>`
         + Array.from({ length: d.goal }, (_, k) => k < d.n ? `<i class=y style="animation-delay:${.3 + k * .12}s"></i>` : "<i></i>").join("") + "</div>", "sc-call"); },
     sum() { const em = document.querySelector("#rec-h1 em"); if (em) { em.classList.remove("sc-slam"); void em.offsetWidth; later(() => em.classList.add("sc-slam"), 200); }
-      ["rec-mem", "rec-disk"].forEach((id, k) => later(() => document.getElementById(id)?.classList.add("sc-pop"), 600 + k * 260)); },
+      ["rec-mem", "rec-chip", "rec-disk"].forEach((id, k) => later(() => document.getElementById(id)?.classList.add("sc-pop"), 600 + k * 260)); },
   };
   const scene = () => { reset(); const st = steps[i], f = SC[st.dataset.scene]; if (!f || !P.classList.contains("on")) return;
     try { f(JSON.parse(st.dataset.d || "{}")); } catch (_) {} };

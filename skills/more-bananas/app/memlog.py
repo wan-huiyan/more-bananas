@@ -259,7 +259,7 @@ lpk = max(range(len(lv)), key=lambda i: LO[i])
 mood, word, tone = (("calm", "calm", "#34d399") if out_mb < 5 else
                     ("tight", "swapping a little", "#fbbf24") if out_mb < 100 else
                     ("over", "swapping hard", "#fb7185"))
-if mood == "calm" and cpu_pct >= 60:  # memory is calm but the processors are not: amber dot and tab icon, not green
+if mood == "calm" and load1 > cores:  # memory is calm but the processors have more work than cores: amber, not green
     tone = "#fbbf24"
 mouth = {"calm": "M12 21 Q16 25 20 21", "tight": "M12 22 L20 22", "over": "M12 23 Q16 19 20 23"}[mood]
 fav = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="2" y="2" width="28" height="28" rx="9" fill="{tone.replace("#", "%23")}"/>'
