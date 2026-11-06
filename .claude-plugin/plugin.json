@@ -1,7 +1,7 @@
 {
   "name": "more-bananas",
   "description": "An always-on Mac memory monitor that measures your real workload every minute (Claude Code sessions, the tools and hidden test browsers they start, and every app) and tells you how much RAM your next laptop needs, on a cute self-updating page.",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "author": { "name": "Huiyan Wan" },
   "repository": "https://github.com/wan-huiyan/more-bananas",
   "license": "MIT",

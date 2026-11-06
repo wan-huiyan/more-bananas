@@ -109,70 +109,156 @@ def heat_section(home, today):
     stamps = sorted(set().union(*[set(d) for d in by.values()]))
     if not stamps:
         return ""
-    day = [t for t in stamps if t[:10] == today]
-    if len(day) < 60:                                      # early morning: show the last 24 hours instead
-        end = dt.datetime.strptime(stamps[-1], "%Y-%m-%d %H:%M")
-        day = [t for t in stamps if dt.datetime.strptime(t, "%Y-%m-%d %H:%M") > end - dt.timedelta(hours=24)]
-    t0 = dt.datetime.strptime(day[0], "%Y-%m-%d %H:%M")
-    n = int((dt.datetime.strptime(day[-1], "%Y-%m-%d %H:%M") - t0).total_seconds() // 60) + 1
-    minute = [(t0 + dt.timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M") for i in range(n)]
-    series = {s["k"]: [by[s["k"]].get(t) for t in minute] for s in STRIPS}
+    end = dt.datetime.strptime(stamps[-1], "%Y-%m-%d %H:%M")
+    RANK = {"": 0, "nominal": 0, "fair": 1, "serious": 2, "critical": 3}
 
-    # ---- the strips: one SVG, shared time axis. Drawn twice: wide for laptops, narrow (short labels) for phones ----
-    for s in STRIPS:
-        seen = [x for x in series[s["k"]] if x is not None]
-        s["top"] = s["hi"] if s["hi"] is not None else max(max(seen, default=0) * 1.1, s["line"] * 1.3)
-        if s["k"] == "cpu":                                # a Chrome launch can spike it to 20x; past 4x is just "a lot"
-            s["top"] = min(s["top"], 4)
+    def window(r):
+        """The stamps in range r: today (the last 24 hours early in the morning), or the last r days."""
+        if r == 1:
+            day = [t for t in stamps if t[:10] == today]
+            if len(day) >= 60:
+                return day
+        cut = (end - dt.timedelta(days=r)).strftime("%Y-%m-%d %H:%M")   # stamps sort as text, so compare them as text
+        return [t for t in stamps if t > cut]
 
-    def draw(W, SH, GAP, TOP, tag, wide):
-        X = (lambda i: i * W / (n - 1)) if n > 1 else (lambda i: W / 2)
-        svg, clips = [], []
-        for j, s in enumerate(STRIPS):
-            k, vals, lo, hi = s["k"], series[s["k"]], s["lo"], s["top"]
-            y0 = TOP + j * (SH + GAP)                      # top of this strip; its label sits in the gap above
-            Y = (lambda v, y0=y0, lo=lo, hi=hi: y0 + SH - (min(max(v, lo), hi) - lo) * SH / (hi - lo))
-            ly = Y(s["line"])
-            runs, cur, last = [], [], -9                   # runs of readings; a gap of more than 3 minutes breaks the line
-            for i, x in enumerate(vals):
-                if x is None:
-                    continue
-                if i - last > 3 and cur:
-                    runs.append(cur); cur = []
-                cur.append((i, x)); last = i
-            if cur:
-                runs.append(cur)
-            cid = f"hz{tag}-{k}"
-            clips.append(f'<clipPath id={cid}><rect x=-5 y={y0 - 8} width={W + 10} height={ly - y0 + 8:.1f} /></clipPath>')
-            unit = f' <tspan class=hu>{e(s["unit"])}</tspan>' if wide else ""
-            g = [f'<g class=hs data-k={k}>', f'<text class=hl x=0 y={y0 - 10}><tspan class=hn>{e(s["name"])}</tspan>{unit}</text>',
-                 f'<rect class=hb x=0 y={y0} width={W} height={SH} rx=8 />']
-            for run in runs:
-                pts = " ".join(f"{X(i):.1f},{Y(x):.1f}" for i, x in run)
-                area = f"{X(run[0][0]):.1f},{y0 + SH} {pts} {X(run[-1][0]):.1f},{y0 + SH}"
-                g += [f'<polygon class=ha points="{area}"/>', f'<polyline class=hline points="{pts}"/>',
-                      f'<polygon class=hhot points="{area}" clip-path="url(#{cid})"/>',
-                      f'<polyline class=hlhot points="{pts}" clip-path="url(#{cid})"/>']
-            if not runs:
-                g.append(f'<text class=hnone x={W / 2} y={y0 + SH / 2 + 5} text-anchor=middle>{"No readings yet: this Mac has not reported it." if wide else "no readings yet"}</text>')
-            elif runs[0][0][0] > 30:                       # the measure started later than the window
-                g.append(f'<text class=hnone x={X(runs[0][0][0]) - 6:.1f} y={y0 + SH - 8} text-anchor=end>{"measured " if wide else ""}from {minute[runs[0][0][0]][11:]}</text>')
-            line_txt = "dotted line: " + s["line_txt"] if wide else s["line_txt"].split(":")[0]
-            g.append(f'<line class=hthr x1=0 x2={W} y1={ly:.1f} y2={ly:.1f} /><text class=htk x={W - 2} y={y0 - 10} text-anchor=end>{e(line_txt)}</text></g>')
-            svg += g
-        H = TOP + len(STRIPS) * (SH + GAP) - GAP
-        every = max(n // (6 if wide else 3), 1)
-        ticks = "".join(f'<text class=htk x="{X(i):.1f}" y="{H + 20}" text-anchor="{"start" if i == 0 else "end" if i == n - 1 else "middle"}">{minute[i][11:] if minute[0][:10] == minute[-1][:10] else minute[i][5:10].replace("-", "/") + " " + minute[i][11:]}</text>'
-                        for i in sorted({0, n - 1, *range(0, n, every)}) if i == n - 1 or n - 1 - i > n / (14 if wide else 6))
-        return (f'<svg class="hstrips {"hwide" if wide else "hnarrow"}" data-w={W} viewBox="0 0 {W} {H + 30}" role=img '
-                f'aria-label="Chip temperature, fan speed, processor and graphics load, disk traffic, memory pushed to disk and network traffic, minute by minute">'
-                f'{"".join(clips)}{"".join(svg)}{ticks}<line class=hxh x1=0 x2=0 y1=0 y2={H} /></svg>')
+    on, prev = [1], window(1)[0]                           # a range gets a button only if it reaches further back
+    for r in (3, 7, 30):
+        f_ = window(r)[0]
+        if f_ < prev:
+            on.append(r); prev = f_
+    nd = len({t[:10] for t in stamps})
+    rbar = ('<div class="rbar en" role=group aria-label="Time range">' + "".join(
+        f'<button class="jt rg" data-r={r} aria-pressed={"true" if r == 1 else "false"}>{"Today" if r == 1 else f"{r} days"}</button>' if r in on else
+        f'<button class="jt rg" data-r={r} disabled title="{nd} day{"s" if nd != 1 else ""} measured so far">{r} days</button>' for r in (1, 3, 7, 30)) + '</div>')
 
-    strips = draw(1000, 62, 40, 26, "w", True) + draw(420, 54, 34, 22, "n", False)
+    def view(r):
+        day = window(r)
+        t0 = dt.datetime.strptime(day[0], "%Y-%m-%d %H:%M")
+        nm = int((dt.datetime.strptime(day[-1], "%Y-%m-%d %H:%M") - t0).total_seconds() // 60) + 1
+        rawmin = [(t0 + dt.timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M") for i in range(nm)]
+        raw = {s["k"]: [by[s["k"]].get(t) for t in rawmin] for s in STRIPS}
+        b = 1 if r == 1 else next((b for b in (1, 2, 5, 10, 15, 30, 60, 120) if nm / b <= 1100), 240)
+        minute = rawmin[::b]                               # each point is the busiest minute of its b minutes
+        n = len(minute)
+        series = {k: [max((x for x in xs[i:i + b] if x is not None), default=None) for i in range(0, nm, b)] for k, xs in raw.items()}
+        st = [max((state.get(t, "") for t in rawmin[i:i + b]), key=RANK.get) for i in range(0, nm, b)]
+        ml = minute[0][:10] != minute[-1][:10]
+        lab = (lambda t: dt.datetime.strptime(t, "%Y-%m-%d %H:%M").strftime("%a %-d %b, %H:%M")) if ml else (lambda t: t[11:])
+        for s in STRIPS:
+            seen = [x for x in series[s["k"]] if x is not None]
+            s["top"] = s["hi"] if s["hi"] is not None else max(max(seen, default=0) * 1.1, s["line"] * 1.3)
+            if s["k"] == "cpu":                                # a Chrome launch can spike it to 20x; past 4x is just "a lot"
+                s["top"] = min(s["top"], 4)
+
+        def draw(W, SH, GAP, TOP, tag, wide):
+            X = (lambda i: i * W / (n - 1)) if n > 1 else (lambda i: W / 2)
+            svg, clips = [], []
+            for j, s in enumerate(STRIPS):
+                k, vals, lo, hi = s["k"], series[s["k"]], s["lo"], s["top"]
+                y0 = TOP + j * (SH + GAP)                      # top of this strip; its label sits in the gap above
+                Y = (lambda v, y0=y0, lo=lo, hi=hi: y0 + SH - (min(max(v, lo), hi) - lo) * SH / (hi - lo))
+                ly = Y(s["line"])
+                runs, cur, last = [], [], -9                   # runs of readings; a gap of more than 3 points breaks the line
+                for i, x in enumerate(vals):
+                    if x is None:
+                        continue
+                    if i - last > 3 and cur:
+                        runs.append(cur); cur = []
+                    cur.append((i, x)); last = i
+                if cur:
+                    runs.append(cur)
+                cid = f"hz{tag}{r}-{k}"                        # one clip per strip, per layout, per range: ids must be unique
+                clips.append(f'<clipPath id={cid}><rect x=-5 y={y0 - 8} width={W + 10} height={ly - y0 + 8:.1f} /></clipPath>')
+                unit = f' <tspan class=hu>{e(s["unit"])}</tspan>' if wide else ""
+                g = [f'<g class=hs data-k={k}>', f'<text class=hl x=0 y={y0 - 10}><tspan class=hn>{e(s["name"])}</tspan>{unit}</text>',
+                     f'<rect class=hb x=0 y={y0} width={W} height={SH} rx=8 />']
+                for run in runs:
+                    pts = " ".join(f"{X(i):.1f},{Y(x):.1f}" for i, x in run)
+                    area = f"{X(run[0][0]):.1f},{y0 + SH} {pts} {X(run[-1][0]):.1f},{y0 + SH}"
+                    g += [f'<polygon class=ha points="{area}"/>', f'<polyline class=hline points="{pts}"/>',
+                          f'<polygon class=hhot points="{area}" clip-path="url(#{cid})"/>',
+                          f'<polyline class=hlhot points="{pts}" clip-path="url(#{cid})"/>']
+                if not runs:
+                    g.append(f'<text class=hnone x={W / 2} y={y0 + SH / 2 + 5} text-anchor=middle>{"No readings yet: this Mac has not reported it." if wide else "no readings yet"}</text>')
+                elif runs[0][0][0] > 30:                       # the measure started later than the window
+                    g.append(f'<text class=hnone x={X(runs[0][0][0]) - 6:.1f} y={y0 + SH - 8} text-anchor=end>{"measured " if wide else ""}from {e(lab(minute[runs[0][0][0]]))}</text>')
+                line_txt = "dotted line: " + s["line_txt"] if wide else s["line_txt"].split(":")[0]
+                g.append(f'<line class=hthr x1=0 x2={W} y1={ly:.1f} y2={ly:.1f} /><text class=htk x={W - 2} y={y0 - 10} text-anchor=end>{e(line_txt)}</text></g>')
+                svg += g
+            H = TOP + len(STRIPS) * (SH + GAP) - GAP
+            every = max(n // (6 if wide else 3), 1)
+            ticks = "".join(f'<text class=htk x="{X(i):.1f}" y="{H + 20}" text-anchor="{"start" if i == 0 else "end" if i == n - 1 else "middle"}">{minute[i][11:] if not ml else minute[i][5:10].replace("-", "/") + " " + minute[i][11:]}</text>'
+                            for i in sorted({0, n - 1, *range(0, n, every)}) if i == n - 1 or n - 1 - i > n / (14 if wide else 6))
+            return (f'<svg class="hstrips {"hwide" if wide else "hnarrow"}" data-w={W} viewBox="0 0 {W} {H + 30}" role=img '
+                    f'aria-label="Chip temperature, fan speed, processor and graphics load, disk traffic, memory pushed to disk and network traffic, minute by minute">'
+                    f'{"".join(clips)}{"".join(svg)}{ticks}<line class=hxh x1=0 x2=0 y1=0 y2={H} /></svg>')
+
+        strips = draw(1000, 62, 40, 26, "w", True) + draw(420, 54, 34, 22, "n", False)
+
+        # ---- headline: how long it ran hot, counted on minutes, never on points ----
+        hot = [i for i in range(nm) if (raw["temp"][i] or 0) >= HOT_TEMP or (raw["fan"][i] or 0) >= LOUD_FAN]
+        flat = [i for i in range(nm) if (raw["cpu"][i] or 0) > 1]
+        has_heat = any(x is not None for x in raw["temp"] + raw["fan"])
+        when = ("Today" if not ml else "In the last 24 hours") if r == 1 else f"In the last {r} days"
+        if has_heat and hot:
+            head = f"{when} it ran <em>hot</em> for {_span(len(hot))}"
+        elif has_heat:
+            head = f"{when} it has stayed <em>cool</em>"
+        else:
+            head = f"{when} the processors had <em>work waiting</em> for {_span(len(flat))}" if flat else f"{when} the processors had <em>room</em>"
+        first_i = next((i for i in range(nm) if raw["temp"][i] is not None), None)
+
+        # ---- who kept the processors busy: during the hot minutes if there are enough, otherwise the whole range ----
+        pick = [rawmin[i] for i in hot] if len(hot) >= 10 else rawmin
+        share = {}
+        for t in pick:
+            for g_, x in apps.get(t, {}).items():
+                share[g_] = share.get(g_, 0) + x
+        tot = sum(share.values())
+        who_title = ("Who kept the processors busy while it ran hot" if len(hot) >= 10 else "Who kept the processors busy " + when.lower())
+        if tot:
+            sc = max(share.values())
+            rows = "".join(f'<div class=row style="--i:{j}" title="{e(g_)}"><span>{e(g_)}</span><div class=track><b style="--w:{x / sc * 100:.0f}%"></b></div><em>{x / tot * 100:.0f}%</em></div>'
+                           for j, (g_, x) in enumerate(sorted(share.items(), key=lambda kv: -kv[1])[:9]) if x / tot >= .005)
+            who = f'<div class=list>{rows}</div><p class=note>Share of all the processor time used, from {e(lab(min(t for t in pick if t in apps)))}.</p>'
+        else:
+            who = '<p class=note>The per-app processor log starts with the next reading.</p>'
+        papps = {}
+        for i in range(0, nm, b):
+            acc, k_ = {}, 0
+            for t in rawmin[i:i + b]:
+                if t in apps:
+                    k_ += 1
+                    for g_, x in apps[t].items():
+                        acc[g_] = acc.get(g_, 0) + x
+            if k_:
+                papps[str(i // b)] = sorted(((g_, round(x / k_, 1)) for g_, x in acc.items()), key=lambda kv: -kv[1])[:3]
+        data = {"t": minute, "s": {k: [None if x is None else round(x, 1) for x in v] for k, v in series.items()},
+                "state": st, "apps": papps, "n": n, "b": b, "ml": ml,
+                "names": {s["k"]: "Processors: work waiting" if s["k"] == "cpu" else s["name"] for s in STRIPS}, "units": {s["k"]: s["unit"] for s in STRIPS}}
+        note = (f'<p class="note en" style="--n:5">Temperature, fan, graphics, disk and network are measured from {e(lab(rawmin[first_i]))}{" today" if when == "Today" else ""}; processors and memory from earlier.</p>'
+                if first_i is not None and first_i > 30 else "")
+        return raw, rawmin, f"""<div class=rv data-r={r}{"" if r == 1 else " hidden"}>
+<div class=en><h2 class=big>{head}</h2></div>
+<p class="lede en" style="--n:1">Each strip is one thing, {"minute by minute" if b == 1 else f"each point the busiest minute of {b}"}. Above the dotted line it starts to make the Mac hot, loud or slow, and that part turns red. Hover any strip to read every measure {"at that minute" if b == 1 else "there"} and which apps were keeping the processors busy.</p>
+__TILES__
+<div class=two>
+<div class="c chartbox en hchart" style="--n:3">
+{strips}
+<div class="tip htip"></div>
+<script type=application/json class=hdata>{json.dumps(data).replace("</", "<\\/")}</script>
+</div>
+<div class="c en" style="--n:4"><small>{e(who_title)}</small>{who}</div>
+</div>
+{note}
+</div>"""
+
+    views = [view(r) for r in on]
+    raw, rawmin, _ = views[0]
 
     # ---- right now: the last reading of each measure ----
     def now(k):
-        for x in reversed(series[k]):
+        for x in reversed(raw[k]):
             if x is not None:
                 return x
         return None
@@ -183,7 +269,7 @@ def heat_section(home, today):
     def fmt(s, x):
         return f'{x:.0f}<small>°C</small>' if s["k"] == "temp" else f'{x:.1f}<small>×</small>' if s["k"] == "cpu" else f'{x:.0f}<small>%</small>' if s["unit"].startswith("%") else f'{x:,.0f}<small> MB/min</small>'
 
-    state_now = next((state[t] for t in reversed(minute) if t in state), "")
+    state_now = next((state[t] for t in reversed(rawmin) if t in state), "")
     tiles = []
     for s in STRIPS:
         x = now(s["k"])
@@ -198,55 +284,12 @@ def heat_section(home, today):
             lvl, w = max(lvl, 1), f"{w}; macOS is starting to hold back"
         tiles.append(f'<div class="ht c" data-lvl={lvl}><span class=htn>{e(s["name"])}</span><b>{fmt(s, x)}</b>'
                      f'<span class=hw><i></i>{e(w)}</span></div>')
-
-    # ---- headline: how long it ran hot today ----
-    hot = [i for i in range(n) if (series["temp"][i] or 0) >= HOT_TEMP or (series["fan"][i] or 0) >= LOUD_FAN]
-    flat = [i for i in range(n) if (series["cpu"][i] or 0) > 1]
-    has_heat = any(x is not None for x in series["temp"] + series["fan"])
-    when = "Today" if minute[0][:10] == minute[-1][:10] else "In the last 24 hours"
-    if has_heat and hot:
-        head = f"{when} it ran <em>hot</em> for {_span(len(hot))}"
-    elif has_heat:
-        head = f"{when} it has stayed <em>cool</em>"
-    else:
-        head = f"{when} the processors had <em>work waiting</em> for {_span(len(flat))}" if flat else f"{when} the processors had <em>room</em>"
-    first_heat = next((minute[i][11:] for i in range(n) if series["temp"][i] is not None), None)
-
-    # ---- who kept the processors busy: during the hot minutes if there are enough, otherwise all day ----
-    pick = [minute[i] for i in hot] if len(hot) >= 10 else minute
-    share = {}
-    for t in pick:
-        for g_, x in apps.get(t, {}).items():
-            share[g_] = share.get(g_, 0) + x
-    tot = sum(share.values())
-    who_title = ("Who kept the processors busy while it ran hot" if len(hot) >= 10 else "Who kept the processors busy " + when.lower())
-    if tot:
-        sc = max(share.values())
-        rows = "".join(f'<div class=row style="--i:{j}" title="{e(g_)}"><span>{e(g_)}</span><div class=track><b style="--w:{x / sc * 100:.0f}%"></b></div><em>{x / tot * 100:.0f}%</em></div>'
-                       for j, (g_, x) in enumerate(sorted(share.items(), key=lambda kv: -kv[1])[:9]) if x / tot >= .005)
-        who = f'<div class=list>{rows}</div><p class=note>Share of all the processor time used, from {e(min(t for t in pick if t in apps)[11:])}.</p>'
-    else:
-        who = '<p class=note>The per-app processor log starts with the next reading.</p>'
-
-    data = {"t": minute, "s": {k: [None if x is None else round(x, 1) for x in v] for k, v in series.items()},
-            "state": [state.get(t, "") for t in minute],
-            "apps": {str(i): sorted(apps[t].items(), key=lambda kv: -kv[1])[:3] for i, t in enumerate(minute) if t in apps},
-            "n": n,
-            "names": {s["k"]: "Processors: work waiting" if s["k"] == "cpu" else s["name"] for s in STRIPS}, "units": {s["k"]: s["unit"] for s in STRIPS}}
+    tiles_html = f'<div class="htiles en" style="--n:2">{"".join(tiles)}</div>'
     return f"""
-<section class=panel id=p-heat role=tabpanel><div class=inner>
-<div class=en><p class=kick><i class=dot></i>Everything that makes a Mac hot, loud or slow, measured every minute.</p><h2 class=big>{head}</h2></div>
-<p class="lede en" style="--n:1">Each strip is one thing, minute by minute. Above the dotted line it starts to make the Mac hot, loud or slow, and that part turns red. Hover any strip to read every measure at that minute and which apps were keeping the processors busy.</p>
-<div class="htiles en" style="--n:2">{"".join(tiles)}</div>
-<div class=two>
-<div class="c chartbox en" style="--n:3" id=hchart>
-{strips}
-<div class=tip id=htip></div>
-</div>
-<div class="c en" style="--n:4"><small>{e(who_title)}</small>{who}</div>
-</div>
-{f'<p class="note en" style="--n:5">Temperature, fan, graphics, disk and network are measured from {e(first_heat)}{" today" if when == "Today" else ""}; processors and memory from earlier.</p>' if first_heat and series["temp"].index(next(x for x in series["temp"] if x is not None)) > 30 else ""}
-<script type=application/json id=hdata>{json.dumps(data).replace("</", "<\\/")}</script>
+<section class="panel rpanel" id=p-heat role=tabpanel><div class=inner>
+<div class=en><p class=kick><i class=dot></i>Everything that makes a Mac hot, loud or slow, measured every minute.</p></div>
+{rbar}
+{"".join(h.replace("__TILES__", tiles_html) for _, _, h in views)}
 </div></section>
 """
 
@@ -272,9 +315,9 @@ HEAT_CSS = """
 .hstrips .hthr{stroke:var(--fg);stroke-width:1.5;stroke-dasharray:2 7;stroke-linecap:round;opacity:.6}
 .hstrips .htk,.hstrips .hnone{font:500 12px 'Geist Mono',monospace;fill:var(--mute)}
 .hstrips .hxh{stroke:var(--fg);stroke-width:1;opacity:0} .hstrips.hovering .hxh{opacity:.35}
-#htip{transform:translate(-50%,8px);white-space:normal;width:max-content;max-width:360px}
-#htip .r{display:flex;justify-content:space-between;gap:14px} #htip .r span,#htip .r b{white-space:nowrap}
-#htip .r em{font:600 10.5px Geist,sans-serif;font-style:normal;text-transform:uppercase;letter-spacing:.04em;margin-left:6px;padding:1px 5px;border-radius:6px;background:var(--hot);color:#fff} #htip .ap{margin-top:5px;opacity:.85;font-size:12px}
+.htip{transform:translate(-50%,8px);white-space:normal;width:max-content;max-width:360px}
+.htip .r{display:flex;justify-content:space-between;gap:14px} .htip .r span,.htip .r b{white-space:nowrap}
+.htip .r em{font:600 10.5px Geist,sans-serif;font-style:normal;text-transform:uppercase;letter-spacing:.04em;margin-left:6px;padding:1px 5px;border-radius:6px;background:var(--hot);color:#fff} .htip .ap{margin-top:5px;opacity:.85;font-size:12px}
 @media(max-width:1250px){.htiles{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:560px){.htiles{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px} .ht{padding:8px 9px!important;border-radius:16px!important} .ht .htn,.ht .hw{font-size:11px} .ht b{font-size:19px} .ht b small{font-size:10.5px;margin-left:1px}}
 """
@@ -282,9 +325,8 @@ HEAT_CSS = """
 HEAT_JS = """<script>
 (() => {
   // Hot & slow strips: one crosshair across every strip; the tip lists each measure at that minute and the busiest apps.
-  const box = document.getElementById("hchart"), dEl = document.getElementById("hdata");
-  if (!box || !dEl) return;
-  const D = JSON.parse(dEl.textContent), tip = document.getElementById("htip");
+  document.querySelectorAll(".hchart").forEach(box => {
+  const D = JSON.parse(box.querySelector(".hdata").textContent), tip = box.querySelector(".htip");
   const lines = {temp: 90, fan: 60, cpu: 1, gpu: 85, disk: 1000, swap: 100, net: 500};
   const fmt = (k, v) => v == null ? "–" : k === "temp" ? Math.round(v) + " °C" : k === "cpu" ? v.toFixed(1) + "× its cores" : D.units[k].startsWith("%") ? Math.round(v) + "%" : Math.round(v).toLocaleString() + " MB/min";
   const at = (svg, ev) => {
@@ -295,7 +337,7 @@ HEAT_JS = """<script>
     const rows = Object.keys(D.names).map(k => `<div class="r${over(k) ? " hot" : ""}"><span>${D.names[k]}</span><b>${fmt(k, D.s[k][i])}${over(k) ? " <em>over the line</em>" : ""}</b></div>`).join("")
       + (D.state[i] && D.state[i] !== "nominal" ? `<div class="r hot"><span>macOS heat level</span><b>${D.state[i]} <em>slowing it down</em></b></div>` : "");
     const ap = D.apps[i] ? `<div class=ap>Busiest: ${D.apps[i].map(([g, v]) => `${g} ${Math.round(v)}%`).join(", ")}</div>` : "";
-    tip.innerHTML = `<div style="font:600 14px Fredoka,sans-serif;margin-bottom:4px">${D.t[i].slice(11)}</div>${rows}${ap}`;
+    tip.innerHTML = `<div style="font:600 14px Fredoka,sans-serif;margin-bottom:4px">${D.ml ? D.t[i].slice(5).replace("-", "/") : D.t[i].slice(11)}${D.b > 1 ? ", busiest of " + D.b + " min" : ""}</div>${rows}${ap}`;
     const left = r.left - b.left + vx * r.width / Wd, w = tip.offsetWidth;
     tip.style.left = Math.min(Math.max(left, w / 2 + 6), b.width - w / 2 - 6) + "px";
     tip.style.top = Math.min(ev.clientY - b.top + 14, b.height - tip.offsetHeight - 8) + "px";
@@ -304,6 +346,7 @@ HEAT_JS = """<script>
     svg.addEventListener("pointermove", ev => at(svg, ev));
     svg.addEventListener("pointerdown", ev => { box.classList.add("touch"); at(svg, ev); });
     svg.addEventListener("pointerleave", () => { svg.classList.remove("hovering"); box.classList.remove("touch"); });
+  });
   });
 })();
 </script>"""

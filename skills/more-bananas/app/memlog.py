@@ -256,13 +256,13 @@ with open(LIVE, "a") as f:
 # ---------- what the page needs ----------
 allrows = [l.strip().split(",") for l in open(LOG) if l.count(",") == 5]
 first_reading = allrows[0][0]
-rows = allrows[-60 * 24 * 7:]  # last 7 days
+rows = allrows[-60 * 24 * 31:]  # last 31 days: the Today tab can show up to 30
 T = [r[0] for r in rows]
 U, S = [float(r[1]) for r in rows], [float(r[2]) for r in rows]
 N = [int(r[5]) for r in rows]
 need = [U[i] + S[i] for i in range(len(rows))]
 pk = max(range(len(rows)), key=lambda i: need[i])
-lv = [l.strip().split(",") for l in open(LIVE) if l.count(",") == 5][-60 * 24 * 7:]
+lv = [l.strip().split(",") for l in open(LIVE) if l.count(",") == 5][-60 * 24 * 31:]
 LO, LT = [float(r[1]) for r in lv], [r[0] for r in lv]
 lpk = max(range(len(lv)), key=lambda i: LO[i])
 mood, word, tone = (("calm", "calm", "#34d399") if out_mb < 5 else

@@ -27,8 +27,10 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
    paused; pause, step and replay buttons; a click or scroll anywhere puts the page back.
 2. **Today**: two charts, the cause that held the Mac up more first: work waiting for the processors
    against the core count (with who kept them busy), and memory need against the RAM line (the minutes it was
-   actively swapping, and what held memory at today's busiest minute).
-3. **Hot & slow**: everything that makes the Mac hot, loud or slow, minute by minute today: chip
+   actively swapping, and what held memory at today's busiest minute). Buttons switch to the last 3, 7 or 30
+   days; longer ranges plot the busiest minute of each 5 to 60, while the headline still counts real minutes.
+3. **Hot & slow**: everything that makes the Mac hot, loud or slow, minute by minute, today or the last 3, 7 or 30 days
+   (the same switch as Today): chip
    temperature, fan speed, processors, graphics, disk traffic, memory pushed to disk and network traffic, each with a
    dotted "too much" line and red above it; tiles for right now, and which apps kept the processors busy
    while it ran hot. Temperature and fan come from `heat`, a small Swift program install.sh builds.

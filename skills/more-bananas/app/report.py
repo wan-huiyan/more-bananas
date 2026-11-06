@@ -49,6 +49,7 @@ def render(v):
     day_mem = v["day_mem"]
     now_d, by_group, peak_d = v["now_d"], v["by_group"], v["peak_d"]
     terms, mood = v["terms"], v["mood"]
+    T_all, need_all, U_all, LO_all, LT_all = T, need, U, LO, LT   # every minute; the range views below cut their own
     # The Today tab draws today's minutes only (the last 24 hours early in the morning).
     today = T[-1][:10]
     ix = [i for i, t in enumerate(T) if t[:10] == today]
@@ -129,86 +130,225 @@ def render(v):
 
     CAUSE_KEY = "".join(f'<span><i class="cz {k_}"></i>{CAUSE_NAMES[k_]}</span>' for k_ in ("cpu", "both", "mem", "heat"))
 
-    # ---------- panel 2: the busy-stretch chart ----------
+    # ---------- panel 2: Today, or the last 3, 7 or 30 days. One view per range, switched by buttons ----------
     W, H, PAD = 1000, 300, 30
-    top = max(max(need), TOTAL) * 1.18
-    n = len(need)
-    def X(i): return i * W / max(n - 1, 1)
-    def Y(val): return PAD + (H - PAD) - val * (H - PAD) / top
-    ram_y = Y(TOTAL)
-    pts = " ".join(f"{X(i):.1f},{Y(x):.1f}" for i, x in enumerate(need))
-    upts = " ".join(f"{X(i):.1f},{Y(x):.1f}" for i, x in enumerate(U))
-    area = f"0,{H} {pts} {W},{H}"
-    px, py = X(pk), Y(peak)
-    flag_left = px > W * .72
-    ticks = ""
-    for i in range(0, n, max(n // 6, 1)):
-        ticks += f'<text x="{X(i):.1f}" y="{H + 20}" class=tk text-anchor="middle">{e(T[i][11:] if T[i][:10] == T[0][:10] == T[-1][:10] else T[i][5:10].replace("-", "/") + " " + T[i][11:])}</text>'
-    swap_by_t = {t: x for t, x in zip(LT, LO)}
-    drops = []
-    smax = max(max(LO), 50)
-    for i, t in enumerate(T):
-        x = swap_by_t.get(t, 0)
-        if x >= 5:
-            h = 10 + 50 * x / smax
-            drops.append(f'<g class=dr style="--d:{(i % 7) * .3:.1f}s"><rect x="{X(i)-3:.1f}" y="0" width="6" height="{h:.1f}" rx="3"/>'
-                         f'<circle cx="{X(i):.1f}" cy="{h + 4:.1f}" r="3.2"/><title>{e(t)}: {x:.0f} MB pushed to disk</title></g>')
-    tc = [cause.get(t, "") for t in T]
-    CB, step_ = H + 118, W / max(n - 1, 1)
-    band, run_c, run_s = [], None, 0
-    for i in range(n + 1):
-        c_ = tc[i] if i < n else None
-        if c_ != run_c:
-            if run_c:
-                x0 = max(X(run_s) - step_ / 2, 0)
-                band.append(f'<rect class="cz {run_c}" x="{x0:.1f}" y="{CB}" width="{min(X(i - 1) + step_ / 2, W) - x0:.1f}" height="16">'
-                            f'<title>{e(T[run_s][11:])}{"–" + e(T[i - 1][11:]) if i - 1 > run_s else ""}: held up by {held(run_c)}</title></rect>')
-            run_c, run_s = c_, i
-    cpu_i = next((i for i, t in enumerate(T) if cpu_from and t >= cpu_from), None)
-    band_note = ("processors not measured yet" if cpu_i is None else
-                 f"processors measured from {T[cpu_i][11:]}" if cpu_i > 30 else "")
-    # The processors chart: work waiting per minute (load average over cores); above 1x there is more work than cores.
-    wv = [wait_by_t.get(t) for t in T]
-    has_w = any(x is not None for x in wv)
-    CH_ = 190
-    ctop = max(min(max([x for x in wv if x is not None], default=1) * 1.1, 4), 1.5)
-    def CY(x): return 10 + CH_ - min(x, ctop) * CH_ / ctop
-    cruns, cur_, last_ = [], [], -9
-    for i, x in enumerate(wv):
-        if x is None:
-            continue
-        if i - last_ > 3 and cur_:
-            cruns.append(cur_); cur_ = []
-        cur_.append((i, x)); last_ = i
-    if cur_:
-        cruns.append(cur_)
-    cpoly = ""
-    for run in cruns:
-        pts_ = " ".join(f"{X(i):.1f},{CY(x):.1f}" for i, x in run)
-        ar_ = f"{X(run[0][0]):.1f},{10 + CH_} {pts_} {X(run[-1][0]):.1f},{10 + CH_}"
-        cpoly += (f'<polygon class=wa points="{ar_}"/><polygon class=wah points="{ar_}" clip-path="url(#wabove)"/>'
-                  f'<polyline class=wl points="{pts_}"/><polyline class=wlh points="{pts_}" clip-path="url(#wabove)"/>')
-    cores_n = int(v.get("cores") or 0)
-    today_t = {t for t in T if t[:10] == T[-1][:10]}   # a set: a reinstall can log a minute twice
-    cpu_today = sum(1 for t in today_t if cause.get(t) in ("cpu", "both"))
-    worst_w = max(((x, i) for i, x in enumerate(wv) if x is not None), default=(None, None))
-    csh = {}
-    for t in T:
-        for g_, x in capps.get(t, {}).items():
-            csh[g_] = csh.get(g_, 0) + x
-    ctot = sum(csh.values())
-    if ctot:
-        csc = max(csh.values())
-        cwho = "".join(f'<div class=row style="--i:{j}" title="{e(g_)}"><span>{e(g_)}</span><div class=track><b style="--w:{x / csc * 100:.0f}%"></b></div><em>{x / ctot * 100:.0f}%</em></div>'
-                       for j, (g_, x) in enumerate(sorted(csh.items(), key=lambda kv: -kv[1])[:9]) if x / ctot >= .005)
-        cwho += f'<p class=note style="margin-top:8px">Share of all the processor time used, from {e(min(t for t in T if t in capps)[11:])}.</p>'
-    else:
-        cwho = '<p class=note>The per-app processor log starts with the next reading.</p>'
-    cdata = json.dumps({"t": T, "w": [None if x is None else round(x, 2) for x in wv],
-                        "apps": {str(i): sorted(capps[t].items(), key=lambda kv: -kv[1])[:3] for i, t in enumerate(T) if t in capps},
-                        "top": ctop, "ch": CH_, "cores": cores_n}).replace("</", "<\\/")
-    series = json.dumps({"t": T, "need": [round(x, 2) for x in need], "ram": [round(x, 2) for x in U],
-                         "swap": [round(swap_by_t.get(t, 0)) for t in T], "cause": tc, "cn": CAUSE_NAMES})
+    RANGES = (1, 3, 7, 30)
+
+    def mstamp(t):                                 # minutes since year 1, cheap enough for a month of stamps
+        return dt.date(int(t[:4]), int(t[5:7]), int(t[8:10])).toordinal() * 1440 + int(t[11:13]) * 60 + int(t[14:16])
+
+    def win(stamps, r):
+        """Indices of the stamps in range r: today (the last 24 hours early in the morning), or the last r days."""
+        if r == 1:
+            ix_ = [i for i, t in enumerate(stamps) if t[:10] == stamps[-1][:10]]
+            if len(ix_) >= 60:
+                return ix_
+        cut = mstamp(stamps[-1]) - 1440 * r
+        return [i for i, t in enumerate(stamps) if mstamp(t) > cut]
+
+    def bsize(nmin):                               # minutes per point, so a chart never draws more than ~1,100 points
+        return next((b for b in (1, 2, 5, 10, 15, 30, 60, 120) if nmin / b <= 1100), 240)
+
+    def groups(stamps, ix_, b):
+        gs, k0 = [], None
+        for i in ix_:
+            k = i if b == 1 else mstamp(stamps[i]) // b
+            if k != k0:
+                gs.append([]); k0 = k
+            gs[-1].append(i)
+        return gs
+
+    def ranges_on(stamps):
+        """The ranges worth a button: each must reach further back than the one before it."""
+        on, prev = [1], win(stamps, 1)[0]
+        for r in RANGES[1:]:
+            f_ = win(stamps, r)[0]
+            if f_ < prev:
+                on.append(r); prev = f_
+        return on
+
+    def rbar(on, stamps):
+        nd_ = len({t[:10] for t in stamps})
+        return ('<div class="rbar en" role=group aria-label="Time range">' + "".join(
+            f'<button class="jt rg" data-r={r} aria-pressed={"true" if r == 1 else "false"}>{"Today" if r == 1 else f"{r} days"}</button>' if r in on else
+            f'<button class="jt rg" data-r={r} disabled title="{nd_} day{"s" if nd_ != 1 else ""} measured so far">{r} days</button>' for r in RANGES) + '</div>')
+
+    def tview(r, sfx):
+        ix_ = win(T_all, r)
+        b = 1 if r == 1 else bsize(mstamp(T_all[ix_[-1]]) - mstamp(T_all[ix_[0]]) + 1)
+        gs = groups(T_all, ix_, b)
+        T = [T_all[g[0]] for g in gs]
+        need = [max(need_all[i] for i in g) for g in gs]
+        U = [max(U_all[i] for i in g) for g in gs]
+        raw = {T_all[i] for i in ix_}                  # a set: a reinstall can log a minute twice
+        ml = T[0][:10] != T[-1][:10]
+        def lab(t):
+            return dt.datetime.strptime(t, "%Y-%m-%d %H:%M").strftime("%a %-d %b, %H:%M") if ml else t[11:]
+        when = "today" if r == 1 else f"in the last {r} days"
+        n = len(need)
+        pk = max(range(n), key=need.__getitem__)
+        peak = need[pk]
+        peak_t = T_all[max(ix_, key=lambda i: need_all[i])]   # the real busiest minute, not a bucket's start
+        peak_when = dt.datetime.strptime(peak_t, "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M" if r == 1 else "%a %-d %b, %H:%M")
+        swap_by_t = {t: x for t, x in zip(LT_all, LO_all) if t >= T_all[ix_[0]]}
+        LO = list(swap_by_t.values()) or [0]
+        lpk_t = max(swap_by_t, key=swap_by_t.get) if swap_by_t else T[-1]
+        swap_when = dt.datetime.strptime(lpk_t, "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M")
+        heavy_mins, swap_mins = sum(x >= 100 for x in LO), sum(x >= 5 for x in LO)
+        gswap = [max((swap_by_t.get(T_all[i], 0) for i in g), default=0) for g in gs]
+        top = max(max(need), TOTAL) * 1.18
+        def X(i): return i * W / max(n - 1, 1)
+        def Y(val): return PAD + (H - PAD) - val * (H - PAD) / top
+        ram_y = Y(TOTAL)
+        pts = " ".join(f"{X(i):.1f},{Y(x):.1f}" for i, x in enumerate(need))
+        upts = " ".join(f"{X(i):.1f},{Y(x):.1f}" for i, x in enumerate(U))
+        area = f"0,{H} {pts} {W},{H}"
+        px, py = X(pk), Y(peak)
+        flag_left = px > W * .72
+        ticks = ""
+        for i in range(0, n, max(n // 6, 1)):
+            ticks += f'<text x="{X(i):.1f}" y="{H + 20}" class=tk text-anchor="middle">{e(T[i][11:] if not ml else T[i][5:10].replace("-", "/") + " " + T[i][11:])}</text>'
+        drops = []
+        smax = max(max(LO), 50)
+        for i, t in enumerate(T):
+            x = gswap[i]
+            if x >= 5:
+                h = 10 + 50 * x / smax
+                drops.append(f'<g class=dr style="--d:{(i % 7) * .3:.1f}s"><rect x="{X(i)-3:.1f}" y="0" width="6" height="{h:.1f}" rx="3"/>'
+                             f'<circle cx="{X(i):.1f}" cy="{h + 4:.1f}" r="3.2"/><title>{e(lab(t))}: {x:.0f} MB pushed to disk{f" (the most in {b} minutes)" if b > 1 else ""}</title></g>')
+        CB, step_ = H + 118, W / max(n - 1, 1)
+        band = []
+        if b == 1:
+            tc = [cause.get(t, "") for t in T]
+            run_c, run_s = None, 0
+            for i in range(n + 1):
+                c_ = tc[i] if i < n else None
+                if c_ != run_c:
+                    if run_c:
+                        x0 = max(X(run_s) - step_ / 2, 0)
+                        band.append(f'<rect class="cz {run_c}" x="{x0:.1f}" y="{CB}" width="{min(X(i - 1) + step_ / 2, W) - x0:.1f}" height="16">'
+                                    f'<title>{e(lab(T[run_s]))}{"–" + e(T[i - 1][11:]) if i - 1 > run_s else ""}: held up by {held(run_c)}</title></rect>')
+                    run_c, run_s = c_, i
+        else:                                          # one block per point, fainter when fewer of its minutes were held up
+            tc = []
+            for i, g in enumerate(gs):
+                hc = [cause.get(T_all[j], "") for j in g]
+                hc = [c_ for c_ in hc if c_]
+                c_ = ("heat" if "heat" in hc else max(set(hc), key=hc.count)) if hc else ""
+                tc.append(c_)
+                if c_:
+                    sh = len(hc) / len(g)
+                    band.append(f'<rect class="cz {c_}" x="{max(X(i) - step_ / 2, 0):.1f}" y="{CB}" width="{step_:.2f}" height="16" style="opacity:{.25 + .75 * sh:.2f}">'
+                                f'<title>{e(lab(T[i]))}, {b} minutes: held up {sh:.0%} of them, mostly by {held(c_)}</title></rect>')
+        cpu_i = next((i for i, t in enumerate(T) if cpu_from and t >= cpu_from), None)
+        band_note = ("processors not measured yet" if cpu_i is None else
+                     f"processors measured from {lab(T[cpu_i])}" if cpu_i > 30 else "")
+        # The processors chart: work waiting per minute (load average over cores); above 1x there is more work than cores.
+        wv = [max((wait_by_t[T_all[i]] for i in g if T_all[i] in wait_by_t), default=None) for g in gs]
+        has_w = any(x is not None for x in wv)
+        CH_ = 190
+        ctop = max(min(max([x for x in wv if x is not None], default=1) * 1.1, 4), 1.5)
+        def CY(x): return 10 + CH_ - min(x, ctop) * CH_ / ctop
+        cruns, cur_, last_ = [], [], -9
+        for i, x in enumerate(wv):
+            if x is None:
+                continue
+            if i - last_ > 3 and cur_:
+                cruns.append(cur_); cur_ = []
+            cur_.append((i, x)); last_ = i
+        if cur_:
+            cruns.append(cur_)
+        cpoly = ""
+        for run in cruns:
+            pts_ = " ".join(f"{X(i):.1f},{CY(x):.1f}" for i, x in run)
+            ar_ = f"{X(run[0][0]):.1f},{10 + CH_} {pts_} {X(run[-1][0]):.1f},{10 + CH_}"
+            cpoly += (f'<polygon class=wa points="{ar_}"/><polygon class=wah points="{ar_}" clip-path="url(#wabove{sfx})"/>'
+                      f'<polyline class=wl points="{pts_}"/><polyline class=wlh points="{pts_}" clip-path="url(#wabove{sfx})"/>')
+        cores_n = int(v.get("cores") or 0)
+        held_t = {t for t in raw if t[:10] == T[-1][:10]} if r == 1 else raw
+        cpu_held = sum(1 for t in held_t if cause.get(t) in ("cpu", "both"))
+        worst_w = max(((wait_by_t[t], t) for t in raw if t in wait_by_t), default=(None, None))
+        csh = {}
+        for t in raw:
+            for g_, x in capps.get(t, {}).items():
+                csh[g_] = csh.get(g_, 0) + x
+        ctot = sum(csh.values())
+        if ctot:
+            csc = max(csh.values())
+            cwho = "".join(f'<div class=row style="--i:{j}" title="{e(g_)}"><span>{e(g_)}</span><div class=track><b style="--w:{x / csc * 100:.0f}%"></b></div><em>{x / ctot * 100:.0f}%</em></div>'
+                           for j, (g_, x) in enumerate(sorted(csh.items(), key=lambda kv: -kv[1])[:9]) if x / ctot >= .005)
+            cwho += f'<p class=note style="margin-top:8px">Share of all the processor time used, from {e(lab(min(t for t in raw if t in capps)))}.</p>'
+        else:
+            cwho = '<p class=note>The per-app processor log starts with the next reading.</p>'
+        capg = {}
+        for i, g in enumerate(gs):
+            acc, k_ = {}, 0
+            for j in g:
+                if T_all[j] in capps:
+                    k_ += 1
+                    for g_, x in capps[T_all[j]].items():
+                        acc[g_] = acc.get(g_, 0) + x
+            if k_:
+                capg[str(i)] = sorted(((g_, round(x / k_, 1)) for g_, x in acc.items()), key=lambda kv: -kv[1])[:3]
+        cdata = json.dumps({"t": T, "w": [None if x is None else round(x, 2) for x in wv], "apps": capg, "b": b, "ml": ml,
+                            "top": ctop, "ch": CH_, "cores": cores_n}).replace("</", "<\\/")
+        mdata = json.dumps({"t": T, "need": [round(x, 2) for x in need], "ram": [round(x, 2) for x in U], "b": b, "pk": pk, "top": round(top, 3),
+                            "swap": [round(x) for x in gswap], "cause": tc, "cn": CAUSE_NAMES}).replace("</", "<\\/")
+        peak_d = v["apps"].get(peak_t, {})
+        since_ = mstamp(T_all[ix_[0]]) > mstamp(T_all[-1]) - 1440 * r + 30 and r > 1
+        h2 = (f"Processors held it up <em class=nw>{span(cpu_held)}</em> {when}" if cpu_first and cpu_held else
+              f"{when[0].upper() + when[1:]} it needed <em>{gb(peak)} GB</em>" if peak > TOTAL else
+              f"{when[0].upper() + when[1:]} it has <em>fitted</em>{' so far' if r == 1 else ''}")
+        return f"""<div class=rv data-r={r}{"" if r == 1 else " hidden"}>
+<div class=en><h2 class=big>{h2}</h2>{f'<p class=note style="margin:8px 0 14px">Measured since {e(lab(T_all[ix_[0]]))}; the monitor has not run longer than that yet.</p>' if since_ else ""}</div>
+<p class="lede en" style="--n:1">{"Two things can hold it up, and the one that held it up more comes first. " if has_w else ""}{"The purple line is work waiting for the processors: above its dotted line there was more work than its " + str(cores_n) + " cores could run. " if has_w else ""}The red line is everything held in memory: above the dotted {TOTAL:.0f} GB line it no longer fits, so the striped part sits on the disk, and the drops are the minutes it was moving memory out. {f"Each point is the busiest minute of {b}. " if b > 1 else ""}Hover to read any {"minute" if b == 1 else "point"}.</p>
+<div class="todays{" cpufirst" if cpu_first else ""}">
+{f"""<div class="two tcpu">
+<div class="c chartbox en cchart" style="--n:2">
+<small>Processors: work waiting, as &times; its {cores_n} cores</small>
+<svg class=ws viewBox="0 -14 {W} {CH_ + 52}" role=img aria-label="Work waiting for the processors per minute, against the {cores_n} cores this Mac has">
+<clipPath id=wabove{sfx}><rect x=0 y=-20 width={W} height={CY(1) + 20:.1f} /></clipPath>
+<rect class=czb x=0 y=10 width={W} height={CH_} rx=8 />{cpoly}
+<line class=ceil x1=0 x2={W} y1={CY(1):.1f} y2={CY(1):.1f} /><text x={W} y=2 class=tk text-anchor=end>dotted line: 1&times;, more work than its {cores_n} cores can run</text>
+{f'<text x="{X(cruns[0][0][0]) - 6:.1f}" y="{CH_ + 2}" class=tk text-anchor=end>measured from {e(lab(T[cruns[0][0][0]]))}</text>' if cruns and cruns[0][0][0] > 30 else ""}
+{ticks.replace(f'y="{H + 20}"', f'y="{CH_ + 32}"')}
+<line class=xh x1=0 x2=0 y1=10 y2={10 + CH_} /></svg>
+<div class=tip></div>
+<script type=application/json class=cdata>{cdata}</script>
+</div>
+<div class="c en" style="--n:3"><small>Who kept the processors busy {when}{f", worst at {e(lab(worst_w[1]))} ({worst_w[0]:.1f}&times;)" if worst_w[1] is not None else ""}</small><div class=list>{cwho}</div></div>
+</div>""" if has_w else ""}
+<div class="two tmem">
+<div class="c chartbox en mchart" style="--n:2">
+<svg class=ts viewBox="0 -30 {W} {H + 170}" role=img aria-label="Memory needed per minute against the {TOTAL:.0f} GB the Mac has">
+<clipPath id=above{sfx}><rect x=0 y=-40 width={W} height={ram_y + 40:.1f} /></clipPath><clipPath id=below{sfx}><rect x=0 y={ram_y:.1f} width={W} height={H} /></clipPath>
+<polygon class=under points="{area}" clip-path="url(#below{sfx})"/>
+<polygon class=over points="{area}" clip-path="url(#above{sfx})"/>
+<line class=ceil x1=0 x2={W} y1={ram_y:.1f} y2={ram_y:.1f} />
+<text x=8 y={ram_y + 20:.1f} class=tk>{TOTAL:.0f} GB: all the memory this Mac has</text>
+<polyline class=ram pathLength=1 points="{upts}"/>
+<polyline class=need pathLength=1 points="{pts}"/>
+<g transform="translate({px:.1f} {py:.1f})"><line x1=0 y1=0 x2=0 y2=-46 stroke="var(--fg)" stroke-width=2 />
+<path class=flagb d="M0 -46 h{-74 if flag_left else 74} v22 h{74 if flag_left else -74}z" fill="var(--hot)"/>
+<text x="{-37 if flag_left else 37}" y=-30 text-anchor=middle fill="#fff" font-family="Fredoka,sans-serif" font-weight=700 font-size=14>{gb(peak)} GB</text>
+<circle r=6 fill="var(--bg)" stroke="var(--hot)" stroke-width=3 /></g>
+<line class=xh x1=0 x2=0 y1=0 y2={H} />
+<g class=walker>{mini(0, 0, 40, mood=mood)}</g>
+{ticks}
+<g class=drops transform="translate(0 {H + 30})">{"".join(drops)}</g>
+<text x=0 y={H + 104} class=tk>Drops: {"minutes" if b == 1 else "stretches"} it pushed memory to disk (worst: {max(LO):.0f} MB at {e(swap_when)})</text>
+<g class=peek>{mini(W - 34, H + 2, 46, flip=True, mood=mood)}</g>
+<rect class=czb x=0 y={CB} width={W} height=16 rx=4 />{"".join(band)}
+<text x=0 y={CB + 36} class=tk>What held it up, {"minute by minute (blank: nothing did)" if b == 1 else f"{b} minutes at a time (fainter: held up for fewer of them)"}{(" &middot; " + band_note) if band_note else ""}</text>
+</svg>
+<div class=tip></div>
+<script type=application/json class=mdata>{mdata}</script>
+</div>
+<div class="c en" style="--n:3"><small>What held the memory at {"today&#x27;s busiest minute" if r == 1 else "the busiest minute " + when}, {e(peak_when)}</small><div class=list>{bars(peak_d, peak_t)}</div></div>
+</div>
+<div class="legend en" style="--n:4"><span><i style="background:var(--hot)"></i>memory needed (in RAM + parked on disk)</span><span><i style="background:var(--ram)"></i>in RAM</span><span><i style="background:repeating-linear-gradient(45deg,var(--hot) 0 2px,transparent 2px 5px)"></i>overflow onto disk</span><span>{swap_mins} minutes swapping, {heavy_mins} of them heavy</span></div>
+<div class="legend en" style="--n:5">{CAUSE_KEY}</div>
+</div></div>"""
 
     # ---------- panel 4: history as stacked buddy heads ----------
     days = [d for d in v["days"] if d >= min(day_sess)]
@@ -644,6 +784,8 @@ def render(v):
     d7_cut = (dt.datetime.strptime(a_last, "%Y-%m-%d %H:%M") - dt.timedelta(days=7)).strftime("%Y-%m-%d %H:%M") if a_last else ""
     br_peak = max((d_.get(BR, 0) for t, d_ in apps_all.items() if t > d7_cut), default=0)
 
+    cores_n = int(v.get("cores") or 0)
+    t_on = ranges_on(T_all)                           # Today, then 3, 7 and 30 days once there is that much to show
     heat_sec = heat_section(v["HOME"], T[-1][:10])   # the Hot & slow tab; empty (and no tab) before any reading
     tabs = [("rec", "Recommendation"), ("today", "Today")] + ([("heat", "Hot & slow")] if heat_sec else []) + [("days", "Busy days"), ("hours", "Busy hours"), ("uses", "What uses the Mac" if capps else "What uses memory"), ("claude", "What Claude runs"), ("how", "How this works")]
     tab_html = "".join(f'<button role=tab data-go="{k}" aria-controls="p-{k}">{t}</button>' for k, t in tabs)
@@ -739,7 +881,7 @@ h2 .nw{{white-space:nowrap}}
 .ws .xh{{stroke:var(--fg);stroke-width:1;opacity:0}} .ws.hovering .xh{{opacity:.35}} .ladders.cpufirst .lcpu{{order:-1}}
 #p-hours .hmc,#p-hours .hleg-cause,#p-hours .hl-cause{{display:none}} #p-hours.bycause .hmc,#p-hours.bycause .hl-cause{{display:inline}} #p-hours.bycause .hleg-cause{{display:flex}} #p-hours.bycause .hleg-mem,#p-hours.bycause .hl-mem,#p-hours.bycause .hc circle{{display:none}}
 .list{{margin-top:10px;display:grid;gap:7px}}
-.jtabs{{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}} .jt{{font:600 13px Geist,sans-serif;border:2px solid var(--line);background:transparent;border-radius:99px;padding:5px 14px;cursor:pointer;color:inherit}} .jt[aria-pressed=true]{{background:var(--fg);color:var(--bg);border-color:var(--fg)}}
+.jtabs{{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}} .rbar{{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 18px}} .rg:disabled{{opacity:.4;cursor:default}} .jt{{font:600 13px Geist,sans-serif;border:2px solid var(--line);background:transparent;border-radius:99px;padding:5px 14px;cursor:pointer;color:inherit}} .jt[aria-pressed=true]{{background:var(--fg);color:var(--bg);border-color:var(--fg)}}
 .jobs .jr{{grid-template-columns:minmax(0,17rem) 1fr 5.5rem}} .jobs .list{{max-height:52vh;overflow:auto;padding-right:4px}} details.kind summary{{list-style:none;cursor:pointer}} details.kind summary::-webkit-details-marker{{display:none}} details.kind summary .jr span b::before{{content:"\\25B8  ";color:var(--mute)}} details.kind[open] summary .jr span b::before{{content:"\\25BE  "}}
 details.kind summary .row:not(.jr) span::before{{content:"\\25B8  ";color:var(--mute)}} details.kind[open] summary .row:not(.jr) span::before{{content:"\\25BE  "}}
 .kd{{font-size:12.5px;color:var(--mute);margin:4px 0 6px 1.2rem}} details.kind .jl{{position:static;width:auto;background:none;color:inherit;box-shadow:none;border-radius:0;z-index:auto;list-style:none;margin:0 0 10px 1.2rem;padding:0;display:grid;gap:4px;font-size:12.5px}} .jl li{{display:flex;justify-content:space-between;gap:10px}} .jl i{{font-style:normal;color:var(--mute)}} .jl em{{font-style:normal;font-family:'Geist Mono',monospace;color:var(--mute);white-space:nowrap}}
@@ -861,55 +1003,10 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 </div>
 </div></section>
 
-<section class=panel id=p-today role=tabpanel><div class=inner>
-<div class=en><p class=kick><i class=dot></i>{status_line}</p><h2 class=big>{("Processors held it up <em class=nw>" + span(cpu_today) + "</em> today") if cpu_first and cpu_today else ("Today it needed <em>" + gb(peak) + " GB</em>" if peak > TOTAL else "Today it has <em>fitted</em> so far")}</h2></div>
-<p class="lede en" style="--n:1">{"Two things can hold it up, and the one that held it up more comes first. " if has_w else ""}{"The purple line is work waiting for the processors: above its dotted line there was more work than its " + str(cores_n) + " cores could run. " if has_w else ""}The red line is everything held in memory: above the dotted {TOTAL:.0f} GB line it no longer fits, so the striped part sits on the disk, and the drops are the minutes it was moving memory out. Hover to read any minute.</p>
-<div class="todays{" cpufirst" if cpu_first else ""}">
-{f"""<div class="two tcpu">
-<div class="c chartbox en" style="--n:2" id=cchart>
-<small>Processors: work waiting, as &times; its {cores_n} cores</small>
-<svg class=ws viewBox="0 -14 {W} {CH_ + 52}" role=img aria-label="Work waiting for the processors per minute, against the {cores_n} cores this Mac has">
-<clipPath id=wabove><rect x=0 y=-20 width={W} height={CY(1) + 20:.1f} /></clipPath>
-<rect class=czb x=0 y=10 width={W} height={CH_} rx=8 />{cpoly}
-<line class=ceil x1=0 x2={W} y1={CY(1):.1f} y2={CY(1):.1f} /><text x={W} y=2 class=tk text-anchor=end>dotted line: 1&times;, more work than its {cores_n} cores can run</text>
-{f'<text x="{X(cruns[0][0][0]) - 6:.1f}" y="{CH_ + 2}" class=tk text-anchor=end>measured from {e(T[cruns[0][0][0]][11:])}</text>' if cruns and cruns[0][0][0] > 30 else ""}
-{ticks.replace(f'y="{H + 20}"', f'y="{CH_ + 32}"')}
-<line class=xh x1=0 x2=0 y1=10 y2={10 + CH_} /></svg>
-<div class=tip id=ctip></div>
-<script type=application/json id=cdata>{cdata}</script>
-</div>
-<div class="c en" style="--n:3"><small>Who kept the processors busy today{f", worst at {e(T[worst_w[1]][11:])} ({worst_w[0]:.1f}&times;)" if worst_w[1] is not None else ""}</small><div class=list>{cwho}</div></div>
-</div>""" if has_w else ""}
-<div class="two tmem">
-<div class="c chartbox en" style="--n:2" id=chart>
-<svg class=ts viewBox="0 -30 {W} {H + 170}" role=img aria-label="Memory needed per minute against the {TOTAL:.0f} GB the Mac has">
-<clipPath id=above><rect x=0 y=-40 width={W} height={ram_y + 40:.1f} /></clipPath><clipPath id=below><rect x=0 y={ram_y:.1f} width={W} height={H} /></clipPath>
-<polygon class=under points="{area}" clip-path="url(#below)"/>
-<polygon class=over points="{area}" clip-path="url(#above)"/>
-<line class=ceil x1=0 x2={W} y1={ram_y:.1f} y2={ram_y:.1f} />
-<text x=8 y={ram_y + 20:.1f} class=tk>{TOTAL:.0f} GB: all the memory this Mac has</text>
-<polyline class=ram pathLength=1 points="{upts}"/>
-<polyline class=need pathLength=1 points="{pts}"/>
-<g transform="translate({px:.1f} {py:.1f})"><line x1=0 y1=0 x2=0 y2=-46 stroke="var(--fg)" stroke-width=2 />
-<path class=flagb d="M0 -46 h{-74 if flag_left else 74} v22 h{74 if flag_left else -74}z" fill="var(--hot)"/>
-<text x="{-37 if flag_left else 37}" y=-30 text-anchor=middle fill="#fff" font-family="Fredoka,sans-serif" font-weight=700 font-size=14>{gb(peak)} GB</text>
-<circle r=6 fill="var(--bg)" stroke="var(--hot)" stroke-width=3 /></g>
-<line class=xh x1=0 x2=0 y1=0 y2={H} />
-<g class=walker id=walker>{mini(0, 0, 40, mood=mood)}</g>
-{ticks}
-<g class=drops transform="translate(0 {H + 30})">{"".join(drops)}</g>
-<text x=0 y={H + 104} class=tk>Drops: minutes it pushed memory to disk (worst: {LO[lpk]:.0f} MB at {e(swap_when)})</text>
-<g class=peek>{mini(W - 34, H + 2, 46, flip=True, mood=mood)}</g>
-<rect class=czb x=0 y={CB} width={W} height=16 rx=4 />{"".join(band)}
-<text x=0 y={CB + 36} class=tk>What held it up, minute by minute (blank: nothing did){(" &middot; " + band_note) if band_note else ""}</text>
-</svg>
-<div class=tip id=tip></div>
-</div>
-<div class="c en" style="--n:3"><small>What held the memory at today&#x27;s busiest minute, {e(peak_when)}</small><div class=list>{bars(peak_d, peak_t)}</div></div>
-</div>
-<div class="legend en" style="--n:4"><span><i style="background:var(--hot)"></i>memory needed (in RAM + parked on disk)</span><span><i style="background:var(--ram)"></i>in RAM</span><span><i style="background:repeating-linear-gradient(45deg,var(--hot) 0 2px,transparent 2px 5px)"></i>overflow onto disk</span><span>{swap_mins} minutes swapping, {heavy_mins} of them heavy</span></div>
-<div class="legend en" style="--n:5">{CAUSE_KEY}</div>
-</div>
+<section class="panel rpanel" id=p-today role=tabpanel><div class=inner>
+<div class=en><p class=kick><i class=dot></i>{status_line}</p></div>
+{rbar(t_on, T_all)}
+{"".join(tview(r_, f"r{r_}") for r_ in t_on)}
 </div></section>
 
 {heat_sec}
@@ -1058,32 +1155,35 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
   const refit = () => {{ fitTabs(); const c = cur; cur = -1; show(c, false); }};
   addEventListener("resize", refit); if (document.fonts) document.fonts.ready.then(refit);
 
-  // Busy-day chart: a buddy walks along the red line; hovering moves it to the minute under the pointer.
-  const D = {series}, n = D.t.length, W = {W}, H = {H}, PAD = {PAD}, top = {top:.3f};
-  const X = i => i * W / Math.max(n - 1, 1), Y = v => PAD + (H - PAD) - v * (H - PAD) / top;
-  const svg = document.querySelector(".ts"), walker = document.getElementById("walker"), xh = svg.querySelector(".xh"), tip = document.getElementById("tip"), box = document.getElementById("chart");
+  // Memory charts (one per time range): a buddy walks along the red line; hovering moves it to the point under the pointer.
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  let hover = -1, step = 0;
-  const put = (i) => {{
-    walker.setAttribute("transform", `translate(${{X(i)}} ${{Y(D.need[i]) - 2}})`);
-    xh.setAttribute("x1", X(i)); xh.setAttribute("x2", X(i));
-  }};
-  const tipAt = (i) => {{
-    const r = svg.getBoundingClientRect(), b = box.getBoundingClientRect(), vb = svg.viewBox.baseVal;
-    tip.style.left = (r.left - b.left + (X(i) - vb.x) * r.width / vb.width) + "px";
-    tip.style.top = (r.top - b.top + (Y(D.need[i]) - vb.y - 40) * r.height / vb.height) + "px";
-    tip.innerHTML = `<b>${{D.t[i].slice(5).replace("-", "/")}}</b><br><i style="background:var(--hot)"></i>needed ${{D.need[i].toFixed(1)}} GB<br><i style="background:var(--ram)"></i>in RAM ${{D.ram[i].toFixed(1)}} GB<br>${{D.swap[i] ? D.swap[i] + " MB pushed to disk" : "no swapping this minute"}}<br>${{D.cause[i] ? `<i class="cz ${{D.cause[i]}}"></i>held up by ${{D.cn[D.cause[i]]}}` : "nothing held it up"}}`;
-  }};
-  const pick = ev => {{
-    const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
-    const x = (ev.clientX - r.left) * vb.width / r.width + vb.x;
-    return Math.max(0, Math.min(n - 1, Math.round(x / W * (n - 1))));
-  }};
-  svg.addEventListener("pointermove", ev => {{ hover = pick(ev); svg.classList.add("hovering"); put(hover); tipAt(hover); }});
-  svg.addEventListener("pointerleave", () => {{ hover = -1; svg.classList.remove("hovering"); }});
-  svg.addEventListener("pointerdown", ev => {{ if (ev.pointerType !== "mouse") box.classList.add("touch"); }});
-  put({pk});
-  if (!still) setInterval(() => {{ if (hover < 0) {{ step = (step + Math.max(1, Math.round(n / 120))) % n; put(step); }} }}, 250);
+  document.querySelectorAll(".mchart").forEach(box => {{
+    const D = JSON.parse(box.querySelector(".mdata").textContent), n = D.t.length, W = {W}, H = {H}, PAD = {PAD}, top = D.top;
+    const X = i => i * W / Math.max(n - 1, 1), Y = v => PAD + (H - PAD) - v * (H - PAD) / top;
+    const svg = box.querySelector(".ts"), walker = box.querySelector(".walker"), xh = svg.querySelector(".xh"), tip = box.querySelector(".tip");
+    let hover = -1, step = 0;
+    const put = (i) => {{
+      walker.setAttribute("transform", `translate(${{X(i)}} ${{Y(D.need[i]) - 2}})`);
+      xh.setAttribute("x1", X(i)); xh.setAttribute("x2", X(i));
+    }};
+    const tipAt = (i) => {{
+      const r = svg.getBoundingClientRect(), b = box.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+      tip.style.left = (r.left - b.left + (X(i) - vb.x) * r.width / vb.width) + "px";
+      tip.style.top = (r.top - b.top + (Y(D.need[i]) - vb.y - 40) * r.height / vb.height) + "px";
+      const one = D.b === 1, span = one ? "this minute" : `these ${{D.b}} minutes`;
+      tip.innerHTML = `<b>${{D.t[i].slice(5).replace("-", "/")}}${{one ? "" : ", busiest of " + D.b + " min"}}</b><br><i style="background:var(--hot)"></i>needed ${{D.need[i].toFixed(1)}} GB<br><i style="background:var(--ram)"></i>in RAM ${{D.ram[i].toFixed(1)}} GB<br>${{D.swap[i] ? D.swap[i] + " MB pushed to disk" + (one ? "" : " at most") : "no swapping " + span}}<br>${{D.cause[i] ? `<i class="cz ${{D.cause[i]}}"></i>held up by ${{D.cn[D.cause[i]]}}` : "nothing held it up"}}`;
+    }};
+    const pick = ev => {{
+      const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+      const x = (ev.clientX - r.left) * vb.width / r.width + vb.x;
+      return Math.max(0, Math.min(n - 1, Math.round(x / W * (n - 1))));
+    }};
+    svg.addEventListener("pointermove", ev => {{ hover = pick(ev); svg.classList.add("hovering"); put(hover); tipAt(hover); }});
+    svg.addEventListener("pointerleave", () => {{ hover = -1; svg.classList.remove("hovering"); }});
+    svg.addEventListener("pointerdown", ev => {{ if (ev.pointerType !== "mouse") box.classList.add("touch"); }});
+    put(D.pk);
+    if (!still) setInterval(() => {{ if (hover < 0 && box.offsetParent) {{ step = (step + Math.max(1, Math.round(n / 120))) % n; put(step); }} }}, 250);
+  }});
 }})();
 let seen = false; try {{ seen = sessionStorage.getItem("mm-seen") === "1"; sessionStorage.setItem("mm-seen", "1"); }} catch (_) {{}}
 </script></body></html>""")))
@@ -1091,25 +1191,35 @@ let seen = false; try {{ seen = sessionStorage.getItem("mm-seen") === "1"; sessi
 
 TODAY_CPU_JS = """<script>
 (() => {
-  // Today's processors chart: a crosshair and a tip with the work waiting and the busiest apps at that minute.
-  const box = document.getElementById("cchart"), dEl = document.getElementById("cdata");
-  if (!box || !dEl) return;
-  const C = JSON.parse(dEl.textContent), svg = box.querySelector("svg.ws"), tip = document.getElementById("ctip"), xh = svg.querySelector(".xh");
-  const n = C.t.length, W = 1000;
-  const at = ev => {
-    const r = svg.getBoundingClientRect(), b = box.getBoundingClientRect(), vb = svg.viewBox.baseVal;
-    const x = (ev.clientX - r.left) * vb.width / r.width + vb.x, i = Math.max(0, Math.min(n - 1, Math.round(x / W * (n - 1)))), vx = i * W / Math.max(n - 1, 1);
-    xh.setAttribute("x1", vx); xh.setAttribute("x2", vx); svg.classList.add("hovering");
-    const w = C.w[i], ap = C.apps[i];
-    tip.innerHTML = `<b>${C.t[i].slice(11)}</b><br>` + (w == null ? "processors not measured" : `${w.toFixed(1)}&times; its ${C.cores} cores, ${w > 1 ? "work waiting" : "keeping up"}`)
-      + (ap ? `<br>${ap.map(([g, v]) => `${g} ${Math.round(v)}%`).join(", ")}` : "");
-    const yv = w == null ? C.ch : 10 + C.ch - Math.min(w, C.top) * C.ch / C.top;
-    tip.style.left = (r.left - b.left + (vx - vb.x) * r.width / vb.width) + "px";
-    tip.style.top = (r.top - b.top + (yv - vb.y - 30) * r.height / vb.height) + "px";
-  };
-  svg.addEventListener("pointermove", at);
-  svg.addEventListener("pointerdown", ev => { if (ev.pointerType !== "mouse") box.classList.add("touch"); at(ev); });
-  svg.addEventListener("pointerleave", () => { svg.classList.remove("hovering"); box.classList.remove("touch"); });
+  // The processors charts (one per time range): a crosshair and a tip with the work waiting and the busiest apps there.
+  document.querySelectorAll(".cchart").forEach(box => {
+    const C = JSON.parse(box.querySelector(".cdata").textContent), svg = box.querySelector("svg.ws"), tip = box.querySelector(".tip"), xh = svg.querySelector(".xh");
+    const n = C.t.length, W = 1000;
+    const at = ev => {
+      const r = svg.getBoundingClientRect(), b = box.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+      const x = (ev.clientX - r.left) * vb.width / r.width + vb.x, i = Math.max(0, Math.min(n - 1, Math.round(x / W * (n - 1)))), vx = i * W / Math.max(n - 1, 1);
+      xh.setAttribute("x1", vx); xh.setAttribute("x2", vx); svg.classList.add("hovering");
+      const w = C.w[i], ap = C.apps[i];
+      tip.innerHTML = `<b>${C.ml ? C.t[i].slice(5).replace("-", "/") : C.t[i].slice(11)}${C.b > 1 ? ", busiest of " + C.b + " min" : ""}</b><br>` + (w == null ? "processors not measured" : `${w.toFixed(1)}&times; its ${C.cores} cores, ${w > 1 ? "work waiting" : "keeping up"}`)
+        + (ap ? `<br>${ap.map(([g, v]) => `${g} ${Math.round(v)}%`).join(", ")}` : "");
+      const yv = w == null ? C.ch : 10 + C.ch - Math.min(w, C.top) * C.ch / C.top;
+      tip.style.left = (r.left - b.left + (vx - vb.x) * r.width / vb.width) + "px";
+      tip.style.top = (r.top - b.top + (yv - vb.y - 30) * r.height / vb.height) + "px";
+    };
+    svg.addEventListener("pointermove", at);
+    svg.addEventListener("pointerdown", ev => { if (ev.pointerType !== "mouse") box.classList.add("touch"); at(ev); });
+    svg.addEventListener("pointerleave", () => { svg.classList.remove("hovering"); box.classList.remove("touch"); });
+  });
+  // One time-range choice for Today and Hot & slow. A panel without that much history shows the longest it has.
+  const apply = r => document.querySelectorAll(".rpanel").forEach(p => {
+    const ok = [...p.querySelectorAll(".rg:not([disabled])")].map(b => +b.dataset.r), use = ok.filter(x => x <= r).pop() || ok[0];
+    p.querySelectorAll(".rg").forEach(b => b.setAttribute("aria-pressed", +b.dataset.r === use));
+    p.querySelectorAll(".rv").forEach(v => v.hidden = +v.dataset.r !== use);
+  });
+  document.querySelectorAll(".rg").forEach(b => b.addEventListener("click", () => {
+    if (b.disabled) return; try { localStorage.setItem("mm-range", b.dataset.r); } catch (_) {} apply(+b.dataset.r); }));
+  let r0 = 1; try { r0 = +(localStorage.getItem("mm-range") || 1); } catch (_) {}
+  if (r0 !== 1) apply(r0);
 })();
 </script>"""
 
