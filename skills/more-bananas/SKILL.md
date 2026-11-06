@@ -22,8 +22,9 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
    A "what held it up" bar on top splits working minutes into processors, memory, both and heat; the bigger
    cause's ladder comes first. The same per-minute labels colour Today, Busy days and Busy hours.
    The buddy explains the answer step by step in a speech bubble while the page's own charts act out each
-   step: bars regrow, the spill turns into red stripes, the jar is measured (it plays once a day, then rests
-   on the summary; pause, step and replay buttons; a click or scroll anywhere puts the page back).
+   step. It opens with what held the Mac up (processors, memory, heat, graphics, disk, network), then walks
+   the bigger cause first: bars regrow, the spill turns into red stripes, the jar is measured. It loops until
+   paused; pause, step and replay buttons; a click or scroll anywhere puts the page back.
 2. **Today**: two charts, the cause that held the Mac up more first: work waiting for the processors
    against the core count (with who kept them busy), and memory need against the RAM line (the minutes it was
    actively swapping, and what held memory at today's busiest minute).

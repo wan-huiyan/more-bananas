@@ -528,6 +528,21 @@ def render(v):
         cl_rows += (f'<div class="row cad{" me" if c == chip and chip_up else ""}" data-c="{c}" style="--i:{k_}"><span><b>{c} cores</b>{tag}</span>'
                     f'<div class=track><b style="--w:{max(f_ * 100, 2):.0f}%"></b></div><em>{f_:.0%}</em></div>')
     # The verdict: working minutes since the processors were first measured, by what held them up.
+    # The other measures over the same working minutes: did heat slow it, did graphics, disk or network go over their lines?
+    wmin = {t for t, c_ in cause.items() if cpu_from and t >= cpu_from and 7 <= int(t[11:13]) < 24}
+    oth = {"n": 0, "over": 0, "hot": 0, "slowed": 0}
+    io_ = {r[0]: r for r in rows_("io.csv", 5)}
+    for r in rows_("heat.csv", 6):
+        if r[0] not in wmin:
+            continue
+        oth["n"] += 1
+        num = lambda x: float(x) if x not in ("", "-1", "-1.0") else -1
+        fan = num(r[2]) / num(r[3]) * 100 if num(r[2]) >= 0 and num(r[3]) > 0 else -1
+        oth["hot"] += num(r[4]) >= 90 or fan >= 60
+        oth["slowed"] += r[1] in ("fair", "serious", "critical")
+        q = io_.get(r[0])
+        oth["over"] += num(r[5]) >= 85 or (q is not None and (num(q[1]) + num(q[2]) >= 1000 or num(q[3]) + num(q[4]) >= 500))
+    p_cpu, p_mem = ((vc["cpu"] + vc["both"]) / vn, (vc["mem"] + vc["both"]) / vn) if vn else (0, 0)
     if vn >= 60:
         seg = "".join(f'<i class="cz {k_}" style="width:{vc[k_] / vn * 100:.2f}%" title="{held(k_)}: {vc[k_]} minutes"></i>' for k_ in vc if vc[k_])
         key = "".join(f'<span><i class="cz {k_}"></i>{held(k_)} <b>{vc[k_]:,} min</b> ({vc[k_] / vn:.0%})</span>' for k_ in vc)
@@ -546,7 +561,18 @@ def render(v):
                          peak_ever_when=peak_ever_when, target=target, rec=rec, budget=budget, fit16=fit16, disk_used=disk_used,
                          disk_txt=disk_txt, disk_rec=disk_rec, n_wd=n_wd, WD_GOAL=WD_GOAL,
                          cpu=dict(ok=cpu_ok, cores=cores, chip=chip, chip_b=chip_b, up=chip_up, wait=wait_pct, days=cpu_days,
-                                  rows=[[c, round(cfits(c) * 100)] for c in CORE_LADDER]))
+                                  rows=[[c, round(cfits(c) * 100)] for c in CORE_LADDER], first=cpu_first, vn=vn,
+                                  p_cpu=p_cpu, p_mem=p_mem, others=oth))
+    # The headline names the bigger cause first.
+    if rec > TOTAL:
+        h1_html = (f"Get a chip with <em>{chip_b}</em>,<br>{rec} GB of memory<br>and {disk_txt} of storage." if chip_up and cpu_first else
+                   f"Get <em>{rec} GB</em> of memory,<br>a chip with {chip_b}<br>and {disk_txt} of storage." if chip_up else
+                   f"Get <em>{rec} GB</em> of memory<br>and {disk_txt} of storage.")
+    else:
+        h1_html = (f"This Mac&#x27;s memory is enough;<br>the processors want <em>{chip_b}</em>." if chip_up else
+                   f"This Mac&#x27;s <em>{TOTAL:.0f} GB</em> is enough<br>for now.")
+    kick_html = (f"Work waited on the processors in {p_cpu:.0%} of working minutes, and on memory in {p_mem:.0%}." if cpu_first else
+                 f"My work has needed up to {peak_ever:.1f} GB of memory. This Mac has {TOTAL:.0f}.")
 
     # ---------- Busy hours: the takeaway ----------
     over_cells = sorted(((x, k) for k, x in wcell.items() if x > TOTAL), reverse=True)
@@ -813,8 +839,8 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 
 <section class=panel id=p-rec role=tabpanel><div class=inner>
 <section class=hero>
-<p class="kick en">My work has needed up to {peak_ever:.1f} GB of memory. This Mac has {TOTAL:.0f}.</p>
-<h1 class=en id=rec-h1>{(f"Get <em>{rec} GB</em> of memory,<br>a chip with {chip_b}<br>and {disk_txt} of storage." if chip_up else f"Get <em>{rec} GB</em> of memory<br>and {disk_txt} of storage.") if rec > TOTAL else (f"This Mac&#x27;s memory is enough;<br>the processors want <em>{chip_b}</em>." if chip_up else f"This Mac&#x27;s <em>{TOTAL:.0f} GB</em> is enough<br>for now.")}</h1>
+<p class="kick en">{kick_html}</p>
+<h1 class=en id=rec-h1>{h1_html}</h1>
 {f'<p class="note en" style="margin:4px 0 0">The chip is a first guess from {cpu_days} working day{"s" if cpu_days != 1 else ""} of processor readings; memory and storage rest on {n_wd}.</p>' if chip_up else ""}
 {lesson}
 </section>
@@ -827,8 +853,9 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <div class="c en" id=rec-jars style="--n:3"><svg class=jars viewBox="0 -60 1000 440" role=img aria-label="A {TOTAL:.0f} GB jar holding the busiest minute's {peak_ever:.1f} GB, next to a {rec} GB jar holding it with room to spare">{jars}</svg></div>
 </div>
 <div class=specs>
+{f'<div class="c en" id=rec-chip style="--n:5"><b>{chip_b}</b><span>processor, a first guess from {cpu_days} working day{"s" if cpu_days != 1 else ""}: more work was waiting than its {cores} cores could run in {wait_pct:.0%} of working minutes.</span></div>' if cpu_ok and cpu_first else ""}
 <div class="c en" id=rec-mem style="--n:4"><b>{rec} GB</b><span>memory, or {budget} GB if budget is tight: enough today, little room to grow.</span></div>
-{f'<div class="c en" id=rec-chip style="--n:5"><b>{chip_b}</b><span>processor, a first guess from {cpu_days} working day{"s" if cpu_days != 1 else ""}: more work was waiting than its {cores} cores could run in {wait_pct:.0%} of working minutes.</span></div>' if cpu_ok else ""}
+{f'<div class="c en" id=rec-chip style="--n:5"><b>{chip_b}</b><span>processor, a first guess from {cpu_days} working day{"s" if cpu_days != 1 else ""}: more work was waiting than its {cores} cores could run in {wait_pct:.0%} of working minutes.</span></div>' if cpu_ok and not cpu_first else ""}
 <div class="c en" id=rec-disk style="--n:5"><b>{disk_txt}</b><span>storage: {disk_used:.0f} GB of this Mac&#x27;s {disk_total:.0f} GB is in use, plus half again for growth.</span></div>
 <div class="c en" id=rec-days style="--n:6"><b>{n_wd} of {WD_GOAL}</b><span>working days measured so far{f"; the processors on {cpu_days}" if cpu_rows else ""}.</span></div>
 </div>
@@ -1100,44 +1127,60 @@ def lesson_html(*, TOTAL, work, wdays, fits, LADDER, peak_ever, peak_ever_when, 
     me = int(round(TOTAL))
     nd = len(wdays)
     # (what the stick points at, what the bubble says, the scene the page acts out, that scene's numbers)
-    steps = [("#rec-note", f"I watched <b>{len(work):,} working minutes</b>, 7am to midnight, over {nd} day{'s' if nd != 1 else ''}. "
-                           "Here is how I got from those to my answer.", "minutes", {"n": len(work)})]
+    first = cpu.get("first") and cpu["ok"]
+    why = []
+    if cpu.get("vn", 0) >= 60:
+        o = cpu["others"]
+        heat_t = ("Heat made it loud but never made macOS slow it down. " if o["hot"] and not o["slowed"] else
+                  f"macOS slowed the chip for heat in {o['slowed']} minutes. " if o["slowed"] else "")
+        oth_t = (f"Graphics, disk and network were over their lines in {o['over']} of {o['n']:,} minutes. " if o["n"] else "")
+        why = [("#rec-why", f"First, what held it up. In {cpu['vn']:,} working minutes, work waited on the processors <b>{cpu['p_cpu']:.0%}</b> "
+                            f"of the time and on memory <b>{cpu['p_mem']:.0%}</b>. {heat_t}{oth_t}"
+                            f"So I start with the {'processors' if first else 'memory'}.", "why", {})]
+    mem = [("#rec-note", (f"Then memory. I watched <b>{len(work):,} working minutes</b>, 7am to midnight, over {nd} day{'s' if nd != 1 else ''}." if first else
+                          f"{'Memory: i' if why else 'I'} watched <b>{len(work):,} working minutes</b>, 7am to midnight, over {nd} day{'s' if nd != 1 else ''}."
+                          + ("" if why else " Here is how I got from those to my answer.")), "minutes", {"n": len(work)})]
     spill = peak_ever > TOTAL
-    steps.append(("#rec-jars", f"The busiest minute, {peak_ever_when}, needed <b>{peak_ever:.1f} GB</b>. "
-                               + (f"This Mac has {TOTAL:.0f}, so {peak_ever - TOTAL:.1f} GB of it had to wait on the disk." if spill else
-                                  f"This Mac has {TOTAL:.0f}, so even that minute fitted."),
-                  "jar", {"jar": 0}))
-    steps.append((row(me), f"{TOTAL:.0f} GB was enough in {'only ' if fit16 < .9 else ''}<b>{fit16:.0%} of those minutes</b>."
-                           + (" The rest of the time, part of what you had open sat on the disk." if fit16 < 1 else ""),
-                  "fit", {"sz": me, "pct": round(fit16 * 100)}))
+    mem.append(("#rec-jars", f"The busiest minute, {peak_ever_when}, needed <b>{peak_ever:.1f} GB</b>. "
+                             + (f"This Mac has {TOTAL:.0f}, so {peak_ever - TOTAL:.1f} GB of it had to wait on the disk." if spill else
+                                f"This Mac has {TOTAL:.0f}, so even that minute fitted."),
+                "jar", {"jar": 0}))
+    mem.append((row(me), f"{TOTAL:.0f} GB was enough in {'only ' if fit16 < .9 else ''}<b>{fit16:.0%} of those minutes</b>."
+                         + (" The rest of the time, part of what you had open sat on the disk." if fit16 < 1 else ""),
+                "fit", {"sz": me, "pct": round(fit16 * 100)}))
     if rec > TOTAL and budget != rec and budget > TOTAL:
-        steps.append((row(budget), f"<b>{budget} GB</b> would have covered 99% of minutes. That is the budget pick: "
-                                   "enough for today, with little room to grow.",
-                      "budget", {"sz": budget, "pct": round(fits(budget, work) * 100)}))
+        mem.append((row(budget), f"<b>{budget} GB</b> would have covered 99% of minutes. That is the budget pick: "
+                                 "enough for today, with little room to grow.",
+                    "budget", {"sz": budget, "pct": round(fits(budget, work) * 100)}))
     jar_i, cap = (1, rec) if rec > TOTAL else (0, int(round(TOTAL)))
-    steps.append(("#rec-jars, #rec-mem",
-                  f"For my answer I take the busiest minute, {peak_ever:.1f} GB, and add a quarter for a heavier week: {target:.1f} GB. "
-                  + (f"The next size Macs come in is <b>{rec} GB</b>." if rec > TOTAL else f"This Mac already has <b>{TOTAL:.0f} GB</b>."),
-                  "measure", {"jar": jar_i, "cap": cap, "a": round(peak_ever, 1), "b": round(target, 1)}))
+    mem.append(("#rec-jars, #rec-mem",
+                f"For memory I take the busiest minute, {peak_ever:.1f} GB, and add a quarter for a heavier week: {target:.1f} GB. "
+                + (f"The next size Macs come in is <b>{rec} GB</b>." if rec > TOTAL else f"This Mac already has <b>{TOTAL:.0f} GB</b>."),
+                "measure", {"jar": jar_i, "cap": cap, "a": round(peak_ever, 1), "b": round(target, 1)}))
+    proc = []
     if cpu["ok"]:
         cd = cpu["days"]
-        steps.append(("#rec-cpu", f"Then the processors. More work was waiting than this Mac&#x27;s {cpu['cores']} cores could run in "
-                                  f"<b>{cpu['wait']:.0%} of working minutes</b> (some of them while memory was stuck too). "
-                                  + (f"A chip with <b>{cpu['chip']} cores</b> would have kept up 9 minutes in 10. " if cpu["chip"] and cpu["up"] else
-                                     f"Even {cpu['chip_b'][:-7]} cores would not have kept up 9 minutes in 10. " if cpu["up"] else
-                                     "This chip kept up 9 minutes in 10, so it is enough. ")
-                                  + f"That is from {cd} working day{'s' if cd != 1 else ''}, so it is a first guess.",
-                      "cores", {"rows": cpu["rows"], "pick": cpu["chip"] if cpu["up"] else 0}))
+        proc.append(("#rec-cpu", f"{'The processors' if first else 'Then the processors'}. More work was waiting than this Mac&#x27;s {cpu['cores']} cores could run in "
+                                 f"<b>{cpu['wait']:.0%} of working minutes</b>. "
+                                 + (f"A chip with <b>{cpu['chip']} cores</b> would have kept up 9 minutes in 10. " if cpu["chip"] and cpu["up"] else
+                                    f"Even {cpu['chip_b'][:-7]} cores would not have kept up 9 minutes in 10. " if cpu["up"] else
+                                    "This chip kept up 9 minutes in 10, so it is enough. ")
+                                 + f"That is from {cd} working day{'s' if cd != 1 else ''}, so it is a first guess.",
+                     "cores", {"rows": cpu["rows"], "pick": cpu["chip"] if cpu["up"] else 0}))
+    steps = why + (proc + mem if first else mem + proc)
     steps.append(("#rec-disk", f"Storage: <b>{disk_used:.0f} GB</b> is in use now. Half again for growth makes "
                                f"{disk_used * 1.5:.0f} GB, so <b>{disk_txt}</b>.",
                   "disk", {"used": round(disk_used), "need": round(disk_used * 1.5), "cap": disk_rec, "label": disk_txt}))
     steps.append(("#rec-days", f"I have measured {n_wd} of {WD_GOAL} working days so far. A busier week could change this, "
                                "so keep me running.", "days", {"n": n_wd, "goal": WD_GOAL}))
-    chip_s = f", a chip with <b>{cpu['chip_b']}</b>" if cpu["ok"] and cpu["up"] else ""
-    steps.append(("#rec-h1", f"So: <b>{rec} GB</b> of memory{chip_s} and <b>{disk_txt}</b> of storage." if rec > TOTAL else
-                             (f"So: this Mac&#x27;s memory is enough, but it needs a chip with <b>{cpu['chip_b']}</b>." if chip_s else
+    mem_p = f"<b>{rec} GB</b> of memory" if rec > TOTAL else ""
+    chip_p = f"a chip with <b>{cpu['chip_b']}</b>" if cpu["ok"] and cpu["up"] else ""
+    parts = [x for x in ((chip_p, mem_p) if first else (mem_p, chip_p)) if x]
+    order = ["rec-chip", "rec-mem", "rec-disk"] if first else ["rec-mem", "rec-chip", "rec-disk"]
+    steps.append(("#rec-h1", ("So: " + ", ".join(parts) + f" and <b>{disk_txt}</b> of storage.") if mem_p else
+                             (f"So: this Mac&#x27;s memory is enough, but it needs a chip with <b>{cpu['chip_b']}</b>." if chip_p else
                               f"So: this Mac&#x27;s <b>{TOTAL:.0f} GB</b> is enough for now. Look again after a busy week."),
-                  "sum", {}))
+                  "sum", {"order": order}))
     n = len(steps)
     items = "".join(f'<li data-t="{t}" data-scene="{sc}" data-d=\'{json.dumps(d)}\'{" class=on" if k == 0 else ""}>'
                     f'<span class=k>{k + 1} of {n}</span>{x}</li>' for k, (t, x, sc, d) in enumerate(steps))
@@ -1226,7 +1269,7 @@ LESSON_JS = r"""<script>
   const P = document.getElementById("p-rec"), steps = [...L.querySelectorAll("li")], n = steps.length;
   const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const ld = L.querySelector(".ld"); ld.innerHTML = steps.map(() => "<i></i>").join(""); const dots = [...ld.children];
-  const bt = L.querySelector(".lt"), today = new Date().toISOString().slice(0, 10);
+  const bt = L.querySelector(".lt");
   const tgts = k => { const sel = steps[k].dataset.t; return sel ? [...document.querySelectorAll(sel)] : []; };
   steps.forEach((_, k) => tgts(k).forEach(el => el.classList.add("lesson-t")));
   // The pointer stick sits in the buddy's raised hand and turns toward whatever the bubble is about.
@@ -1244,7 +1287,6 @@ LESSON_JS = r"""<script>
   try {
     const s = JSON.parse(sessionStorage.getItem("mm-lesson") || "null");
     if (s && s.n === n) { i = Math.min(s.i, n - 1); playing = s.playing; t = s.t || 0; }
-    else if (localStorage.getItem("mm-lesson-day") === today) { i = n - 1; playing = false; }
   } catch (_) {}
   const dur = k => Math.max(4500, Math.min(9500, 2400 + steps[k].textContent.length * 42));
   const save = () => { try { sessionStorage.setItem("mm-lesson", JSON.stringify({ n, i, playing, t })); } catch (_) {} };
@@ -1269,6 +1311,7 @@ LESSON_JS = r"""<script>
   const jarsCard = document.getElementById("rec-jars"), jarSvg = jarsCard && jarsCard.querySelector("svg");
   const lad = sz => P.querySelector(`.lad[data-sz='${sz}']`);
   P.querySelectorAll(".lad,.cad").forEach(r => { const b = r.querySelector(".track b"); r.dataset.w = b.style.getPropertyValue("--w"); r.dataset.em = r.querySelector("em").textContent; });
+  P.querySelectorAll("#rec-why .vbar i").forEach(b => b.dataset.w = b.style.width);
   let ST = [];
   const later = (f, ms) => ST.push(setTimeout(f, calm ? 0 : ms));
   const count = (el, from, to, ms, fmt) => { if (calm) { el.textContent = fmt(to); return; } const t0 = performance.now();
@@ -1294,6 +1337,7 @@ LESSON_JS = r"""<script>
     if (jarsCard) { jarsCard.style.transform = ""; jarsCard.classList.remove("sc-fwd"); }
     P.querySelectorAll(".lad,.cad").forEach(r => { const b = r.querySelector(".track b"); b.style.transition = ""; b.style.setProperty("--w", r.dataset.w); r.querySelector("em").textContent = r.dataset.em; });
     const note = document.getElementById("rec-note"); if (note && note.dataset.t) note.innerHTML = note.dataset.t;
+    P.querySelectorAll("#rec-why .vbar i").forEach(b => { b.style.transition = ""; b.style.width = b.dataset.w; });
   };
   const SC = {
     minutes(d) { const card = P.querySelector(".ladder.meml").closest(".c"), note = document.getElementById("rec-note");
@@ -1338,8 +1382,11 @@ LESSON_JS = r"""<script>
     days(d) { const c = document.getElementById("rec-days"); if (!c) return; dim("sc-on"); lead(c);
       add(c, `<div>${d.n} of ${d.goal} working days measured</div><div class=sc-days>`
         + Array.from({ length: d.goal }, (_, k) => k < d.n ? `<i class=y style="animation-delay:${.3 + k * .12}s"></i>` : "<i></i>").join("") + "</div>", "sc-call"); },
-    sum() { const em = document.querySelector("#rec-h1 em"); if (em) { em.classList.remove("sc-slam"); void em.offsetWidth; later(() => em.classList.add("sc-slam"), 200); }
-      ["rec-mem", "rec-chip", "rec-disk"].forEach((id, k) => later(() => document.getElementById(id)?.classList.add("sc-pop"), 600 + k * 260)); },
+    why() { const c = document.getElementById("rec-why"); if (!c) return; dim("sc-on"); lead(c);
+      c.querySelectorAll(".vbar i").forEach((b, k) => { b.style.transition = "none"; b.style.width = "0%"; void b.offsetWidth;
+        later(() => { b.style.transition = "width 1.1s cubic-bezier(.16,1,.3,1)"; b.style.width = b.dataset.w; }, 250 + k * 600); }); },
+    sum(d) { const em = document.querySelector("#rec-h1 em"); if (em) { em.classList.remove("sc-slam"); void em.offsetWidth; later(() => em.classList.add("sc-slam"), 200); }
+      (d.order || ["rec-mem", "rec-chip", "rec-disk"]).forEach((id, k) => later(() => document.getElementById(id)?.classList.add("sc-pop"), 600 + k * 260)); },
   };
   const scene = () => { reset(); const st = steps[i], f = SC[st.dataset.scene]; if (!f || !P.classList.contains("on")) return;
     try { f(JSON.parse(st.dataset.d || "{}")); } catch (_) {} };
@@ -1358,7 +1405,6 @@ LESSON_JS = r"""<script>
     if (svg && !calm) { svg.classList.remove("nod"); void svg.getBoundingClientRect(); svg.classList.add("nod"); }
     aim(); label(); save();
   };
-  const finish = () => { playing = false; try { localStorage.setItem("mm-lesson-day", today); } catch (_) {} label(); save(); };
   L.querySelector(".lp").onclick = () => { playing = false; go(i - 1); };
   L.querySelector(".ln").onclick = () => { playing = false; go(i + 1); };
   bt.onclick = () => { if (playing) { playing = false; label(); save(); } else { playing = true; if (i === n - 1) go(0); else { label(); save(); } } };
@@ -1370,7 +1416,7 @@ LESSON_JS = r"""<script>
     if (!playing || !P.classList.contains("on") || document.hidden) return;
     t += dt; const d = dur(i);
     if (dots[i]) dots[i].style.setProperty("--p", Math.min(t / d, 1).toFixed(3));
-    if (t >= d) { if (i < n - 1) go(i + 1); else finish(); }
+    if (t >= d) go((i + 1) % n);   // loops: after the summary it starts again, until paused
     else if (Math.floor(t / 1000) !== Math.floor((t - dt) / 1000)) save();
   }, 100);
 })();
