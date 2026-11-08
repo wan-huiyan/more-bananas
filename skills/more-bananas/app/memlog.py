@@ -59,6 +59,24 @@ for line in sh("ps", "-axo", "pid=,ppid=,rss=,%cpu=,command=").splitlines():
     if len(parts) == 5:
         procs[parts[0]] = [parts[1], parts[2], parts[4]]
         pcpu[parts[0]] = float(parts[3]) if parts[3].replace(".", "", 1).isdigit() else 0.0
+# Attribute a process only when its own executable or an observed ancestor identifies Codex.
+# The desktop app is shared infrastructure; none of these processes represents a chat.
+def codex_class(pid):
+    seen = set()
+    current = pid
+    while current in procs and current not in seen:
+        seen.add(current)
+        command = procs[current][2]
+        executable = command.split()[0] if command.split() else ""
+        if ("/codex-cli/" in command and "/MacOS/codex" in command) or executable.endswith("/codex") or executable == "codex":
+            return "Codex shared processes" if current == pid else "Tools started by Codex"
+        if ("/ChatGPT.app/Contents/" in command or "/Codex.app/Contents/" in command
+                or "/.codex/computer-use/" in command):
+            return "Codex shared processes" if current == pid else "Tools started by Codex"
+        current = procs[current][0]
+    return None
+
+
 AUTOMATION = ("--disable-field-trial-config", "--remote-debugging", "--headless", "--enable-automation")
 
 
@@ -70,7 +88,7 @@ def chrome_root(pid):  # the top Chrome process this one belongs to
 
 for pid, (_ppid, rss, cmd) in procs.items():
     gb = int(rss) / 2**20
-    g = next((name for name, test in GROUPS if test(cmd)), "Other apps")
+    g = codex_class(pid) or next((name for name, test in GROUPS if test(cmd)), "Other apps")
     if g == "Chrome (incl. Meet)" and any(k in chrome_root(pid) for k in AUTOMATION):
         g = "Browsers Claude drives"
     grp[pid] = g
@@ -121,6 +139,8 @@ def owner(pid):  # the Claude Code session above this process, if any
 
 jobs, jobs_cpu = {}, {}
 for pid, (_ppid, rss, cmd) in procs.items():
+    if codex_class(pid):
+        continue  # Codex resources have their own groups, not Claude tool rows.
     g = next((name for name, test in GROUPS if test(cmd)), "")
     if g == "Chrome (incl. Meet)" and any(k in chrome_root(pid) for k in AUTOMATION):
         root = pid
