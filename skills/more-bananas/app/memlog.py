@@ -59,20 +59,29 @@ for line in sh("ps", "-axo", "pid=,ppid=,rss=,%cpu=,command=").splitlines():
     if len(parts) == 5:
         procs[parts[0]] = [parts[1], parts[2], parts[4]]
         pcpu[parts[0]] = float(parts[3]) if parts[3].replace(".", "", 1).isdigit() else 0.0
-# Attribute a process only when its own executable or an observed ancestor identifies Codex.
-# The desktop app is shared infrastructure; none of these processes represents a chat.
+# Only a Codex executable is evidence for descendant attribution. Desktop
+# app infrastructure is shared with ChatGPT, so it has its own honest label.
 def codex_class(pid):
+    def is_executable(command, path):
+        return command == path or command.startswith(path + " ")
+
+    def is_codex_cli(command):
+        first = command.split(None, 1)[0] if command else ""
+        return (first == "codex" or first.endswith("/codex")
+                or is_executable(command, "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"))
+
+    command = procs[pid][2]
+    shared_paths = ("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+                    "/Applications/Codex.app/Contents/MacOS/Codex")
+    if (any(is_executable(command, p) for p in shared_paths)
+            or command.startswith("/Applications/ChatGPT.app/Contents/Frameworks/Codex Framework.framework/")):
+        return "ChatGPT and Codex shared app"
     seen = set()
     current = pid
     while current in procs and current not in seen:
         seen.add(current)
-        command = procs[current][2]
-        executable = command.split()[0] if command.split() else ""
-        if ("/codex-cli/" in command and "/MacOS/codex" in command) or executable.endswith("/codex") or executable == "codex":
-            return "Codex shared processes" if current == pid else "Tools started by Codex"
-        if ("/ChatGPT.app/Contents/" in command or "/Codex.app/Contents/" in command
-                or "/.codex/computer-use/" in command):
-            return "Codex shared processes" if current == pid else "Tools started by Codex"
+        if is_codex_cli(procs[current][2]):
+            return "Codex processes" if current == pid else "Tools started by Codex"
         current = procs[current][0]
     return None
 
