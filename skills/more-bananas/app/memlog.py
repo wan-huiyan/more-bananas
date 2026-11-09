@@ -216,6 +216,10 @@ try:
 except Exception:
     prev = None
 mins = max((time.time() - prev["t"]) / 60, 1) if prev else 1
+# After a sleep or a shutdown the counters cover the time the Mac was off too. That is not work, so the first reading
+# after a gap of more than 5 minutes records no swap, disk or network rate rather than an average over the night.
+if mins > 5:
+    prev = None
 
 
 def rate(k):  # MB per minute; 0 on the first run, or after a restart resets the counters
@@ -264,7 +268,7 @@ io_rates = [brate(k) for k in ("disk_r", "disk_w", "net_i", "net_o")]
 with open(HEAT, "a") as f:
     f.write(f"{stamp},{heat_state},{fan_rpm},{fan_max},{chip_c:.1f},{gpu_pct:.0f}\n")
 with open(IO, "a") as f:
-    f.write(stamp + "," + ",".join(f"{x:.1f}" for x in io_rates) + "\n")
+    f.write(stamp + "," + ",".join(f"{x:.1f}" if prev else "" for x in io_rates) + "\n")
 with open(APPCPU, "a") as f:
     for g_, x_ in sorted(cpu_by_group.items(), key=lambda kv: -kv[1]):
         if x_ >= 0.5:
@@ -274,17 +278,55 @@ with open(LIVE, "a") as f:
     f.write(f"{stamp},{out_mb:.1f},{in_mb:.1f},{comp_gb:.2f},{wired_gb:.2f},{squeezed_gb:.2f}\n")
 
 # ---------- what the page needs ----------
-allrows = [l.strip().split(",") for l in open(LOG) if l.count(",") == 5]
-first_reading = allrows[0][0]
-rows = allrows[-60 * 24 * 31:]  # last 31 days: the Today tab can show up to 30
-T = [r[0] for r in rows]
-U, S = [float(r[1]) for r in rows], [float(r[2]) for r in rows]
-N = [int(r[5]) for r in rows]
-need = [U[i] + S[i] for i in range(len(rows))]
-pk = max(range(len(rows)), key=lambda i: need[i])
-lv = [l.strip().split(",") for l in open(LIVE) if l.count(",") == 5][-60 * 24 * 31:]
-LO, LT = [float(r[1]) for r in lv], [r[0] for r in lv]
-lpk = max(range(len(lv)), key=lambda i: LO[i])
+def page_data(home):
+    """Everything the page reads from the per-minute logs in `home`. None if it holds less than an hour of readings."""
+    log, live, apps_p = os.path.join(home, "mem.csv"), os.path.join(home, "live.csv"), os.path.join(home, "apps.csv")
+    allrows = [l.strip().split(",") for l in open(log) if l.count(",") == 5] if os.path.exists(log) else []
+    if len(allrows) < 60:
+        return None
+    first_reading = allrows[0][0]
+    rows = allrows[-60 * 24 * 31:]  # last 31 days: the Today tab can show up to 30
+    T = [r[0] for r in rows]
+    U, S = [float(r[1]) for r in rows], [float(r[2]) for r in rows]
+    N = [int(r[5]) for r in rows]
+    need = [U[i] + S[i] for i in range(len(rows))]
+    pk = max(range(len(rows)), key=lambda i: need[i])
+    lv = [l.strip().split(",") for l in open(live) if l.count(",") == 5][-60 * 24 * 31:] if os.path.exists(live) else []
+    lv = lv or [[T[-1], "0", "0", "0", "0", "0"]]
+    LO, LT = [float(r[1]) for r in lv], [r[0] for r in lv]
+    lpk = max(range(len(lv)), key=lambda i: LO[i])
+    apps = {}
+    for l in open(apps_p) if os.path.exists(apps_p) else ():
+        if l.count(",") >= 2:
+            t, g, gb = l.rstrip("\n").rsplit(",", 2)
+            apps.setdefault(t, {})[g] = float(gb)
+    peak_d = apps.get(T[pk], {})
+    # History: most Claude Code sessions open at once per day (from the session transcripts, rebuilt hourly),
+    # and the measured peak per day.
+    day_sess = collections.defaultdict(lambda: (0, ""))
+    hs = os.path.join(home, "history_sessions.csv")
+    if os.path.exists(hs):
+        for l in open(hs):
+            h, n, _ = l.strip().split(",")
+            if int(n) > day_sess[h[:10]][0]:
+                day_sess[h[:10]] = (int(n), h[11:])
+    day_sess = dict(day_sess)
+    day_mem = {}
+    for r in allrows:
+        v_ = float(r[1]) + float(r[2])
+        if v_ > day_mem.get(r[0][:10], (0, ""))[0]:
+            day_mem[r[0][:10]] = (v_, r[0][11:])
+    first = min([*day_sess, *day_mem])
+    d0 = dt.date.fromisoformat(first)
+    days = [(d0 + dt.timedelta(n)).isoformat() for n in range((dt.date.today() - d0).days + 1)]
+    return dict(LOG=log, allrows=allrows, first_reading=first_reading, rows=rows, T=T, U=U, S=S, N=N, need=need, pk=pk,
+                lv=lv, LO=LO, LT=LT, lpk=lpk, apps=apps, peak_d=peak_d, day_sess=day_sess, day_mem=day_mem, first=first, days=days)
+
+
+hs = os.path.join(HOME, "history_sessions.csv")
+if not os.path.exists(hs) or time.strftime("%M") == "00":
+    subprocess.run([sys.executable, os.path.join(HOME, "backfill_sessions.py")], capture_output=True)
+globals().update(page_data(HOME))
 mood, word, tone = (("calm", "calm", "#34d399") if out_mb < 5 else
                     ("tight", "swapping a little", "#fbbf24") if out_mb < 100 else
                     ("over", "swapping hard", "#fb7185"))
@@ -294,36 +336,39 @@ mouth = {"calm": "M12 21 Q16 25 20 21", "tight": "M12 22 L20 22", "over": "M12 2
 fav = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="2" y="2" width="28" height="28" rx="9" fill="{tone.replace("#", "%23")}"/>'
        f'<circle cx="12" cy="14" r="2" fill="%23fff"/><circle cx="20" cy="14" r="2" fill="%23fff"/>'
        f'<path d="{mouth}" stroke="%23fff" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>')
-
-apps = {}
-for l in open(APPS):
-    if l.count(",") >= 2:
-        t, g, gb = l.rstrip("\n").rsplit(",", 2)
-        apps.setdefault(t, {})[g] = float(gb)
 now_d = apps.get(stamp, by_group)
-peak_d = apps.get(T[pk], {})
 sess = sorted(sessions, key=lambda x: -x[1])
 
-# History: most Claude Code sessions open at once per day (from the session transcripts, rebuilt hourly),
-# and the measured peak per day.
-hs = os.path.join(HOME, "history_sessions.csv")
-if not os.path.exists(hs) or time.strftime("%M") == "00":
-    subprocess.run([sys.executable, os.path.join(HOME, "backfill_sessions.py")], capture_output=True)
-day_sess = collections.defaultdict(lambda: (0, ""))
-if os.path.exists(hs):
-    for l in open(hs):
-        h, n, _ = l.strip().split(",")
-        if int(n) > day_sess[h[:10]][0]:
-            day_sess[h[:10]] = (int(n), h[11:])
-day_sess = dict(day_sess)
-day_mem = {}
-for r in allrows:
-    v_ = float(r[1]) + float(r[2])
-    if v_ > day_mem.get(r[0][:10], (0, ""))[0]:
-        day_mem[r[0][:10]] = (v_, r[0][11:])
-first = min([*day_sess, *day_mem])
-d0 = dt.date.fromisoformat(first)
-days = [(d0 + dt.timedelta(n)).isoformat() for n in range((dt.date.today() - d0).days + 1)]
+# Working hours: by default the page counts only the minutes inside them (Monday to Friday, 9am to 7pm; config.json
+# can change both). The readings are filtered into their own folder and the same page is built from it, so every
+# tab, the recommendation included, sees only working minutes. The all-hours page is built beside it.
+WORK_H = cfg.get("work_hours", [9, 19])
+WORK_D = set(cfg.get("work_days", [0, 1, 2, 3, 4]))     # Monday is 0
+_wd = {}
+def at_work(t):
+    d = t[:10]
+    if d not in _wd:
+        try:
+            _wd[d] = dt.date.fromisoformat(d).weekday() in WORK_D
+        except ValueError:
+            _wd[d] = False
+    return _wd[d] and len(t) >= 13 and t[11:13].isdigit() and WORK_H[0] <= int(t[11:13]) < WORK_H[1]
+WDIR = os.path.join(HOME, ".workhours")
+os.makedirs(WDIR, exist_ok=True)
+for name in ("mem.csv", "apps.csv", "live.csv", "cpu.csv", "cpu_apps.csv", "tools_cpu.csv", "heat.csv", "io.csv", "tools.csv", "history_sessions.csv"):
+    src = os.path.join(HOME, name)
+    if os.path.exists(src):
+        with open(src) as fi, open(os.path.join(WDIR, name + ".tmp"), "w") as fo:
+            fo.writelines(l for l in fi if at_work(l[:16]))
+        os.replace(os.path.join(WDIR, name + ".tmp"), os.path.join(WDIR, name))
+if not os.path.exists(os.path.join(WDIR, "icon")) and os.path.isdir(os.path.join(HOME, "icon")):
+    os.symlink(os.path.join(HOME, "icon"), os.path.join(WDIR, "icon"))
+_h0, _h1 = WORK_H
+def _hr(h):
+    return "noon" if h == 12 else "midnight" if h in (0, 24) else f"{h % 12}{'am' if h < 12 else 'pm'}"
+_dn = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+_ds = sorted(WORK_D)
+work_txt = (f"{_dn[_ds[0]]} to {_dn[_ds[-1]]}" if _ds == list(range(_ds[0], _ds[-1] + 1)) else ", ".join(_dn[d] for d in _ds)) + f", {_hr(_h0)} to {_hr(_h1)}"
 swapped_total_gb = cnt["Swapouts"] * page / 2**30
 _boot = int(re.search(r"sec = (\d+)", sh("sysctl", "-n", "kern.boottime")).group(1))
 _h = (time.time() - _boot) / 3600
@@ -332,15 +377,27 @@ uptime_txt = f"{_h / 24:.1f} days since the last restart" if _h >= 48 else f"{_h
 from report import render  # noqa: E402
 from buddy import theme    # noqa: E402
 
-ctx = locals()                     # at module level this is the module's own namespace; render() reads it and sets yard_measure
-html_page = render(ctx)
 # One buddy per app group and per Claude Code session, with its memory and its share of all the processors.
 crowd = [{"name": g, "gb": round(gb, 2), "cpu": round(cpu_by_group.get(g, 0), 1), "kind": "app"} for g, gb in sorted(now_d.items(), key=lambda kv: -kv[1])
          if g != "Claude Code sessions" and (gb >= 0.1 or cpu_by_group.get(g, 0) >= 1)]
 crowd += [{"name": short(folders.get(p_, "unknown folder")), "gb": round(gb, 2), "cpu": round(pcpu.get(p_, 0) / ncores, 1), "kind": "claude"} for p_, gb in sess]
-html_page = theme(html_page, mood, crowd, ctx.get("yard_measure", "mem"))
-open(OUT + ".tmp", "w").write(html_page)
-os.replace(OUT + ".tmp", OUT)
+OUT_ALL = os.path.join(HOME, "memory-report-all.html")
+wdata = page_data(WDIR)
+ctx = dict(locals())               # the module's namespace; render() reads it and sets yard_measure
+ctx.update(hours="all", hours_txt="every hour the Mac was on", other_ok=wdata is not None,
+           here=OUT_ALL, other=OUT, hrs=list(range(24)), wds=list(range(7)))
+pages = [(OUT_ALL, ctx)]
+if wdata:                          # the default page: working hours only
+    wctx = dict(ctx, **wdata)
+    wctx.update(HOME=WDIR, hours="work", hours_txt=work_txt, here=OUT, other=OUT_ALL,
+                hrs=list(range(_h0, _h1)), wds=_ds, days=[d for d in wdata["days"] if dt.date.fromisoformat(d).weekday() in WORK_D])
+    pages.insert(0, (OUT, wctx))
+else:                              # no working-hours readings yet: the all-hours page is also the default
+    pages.append((OUT, dict(ctx, here=OUT, other=OUT)))
+for out_, c_ in pages:
+    html_page = theme(render(c_), mood, crowd, c_.get("yard_measure", "mem"))
+    open(out_ + ".tmp", "w").write(html_page)
+    os.replace(out_ + ".tmp", out_)
 
 # Optional: copy readings and page to Google Drive every 15 minutes, in case this Mac will not start.
 if cfg.get("drive_backup"):
@@ -348,6 +405,6 @@ if cfg.get("drive_backup"):
     if drives and (int(time.strftime("%M")) % 15 == 0 or not os.path.isdir(os.path.join(drives[0], "Memory Monitor"))):
         dest = os.path.join(drives[0], "Memory Monitor")
         os.makedirs(dest, exist_ok=True)
-        for name in ("mem.csv", "apps.csv", "live.csv", "cpu.csv", "cpu_apps.csv", "tools_cpu.csv", "heat.csv", "io.csv", "tools.csv", "history_sessions.csv", "memory-report.html", "config.json"):
+        for name in ("mem.csv", "apps.csv", "live.csv", "cpu.csv", "cpu_apps.csv", "tools_cpu.csv", "heat.csv", "io.csv", "tools.csv", "history_sessions.csv", "memory-report.html", "memory-report-all.html", "config.json"):
             if os.path.exists(os.path.join(HOME, name)):
                 shutil.copy2(os.path.join(HOME, name), dest)

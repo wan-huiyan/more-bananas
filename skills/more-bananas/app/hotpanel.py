@@ -132,10 +132,10 @@ def heat_section(home, today):
         f'<button class="jt rg" data-r={r} disabled title="{nd} day{"s" if nd != 1 else ""} measured so far">{r} days</button>' for r in (1, 3, 7, 30)) + '</div>')
 
     def view(r):
-        day = window(r)
-        t0 = dt.datetime.strptime(day[0], "%Y-%m-%d %H:%M")
-        nm = int((dt.datetime.strptime(day[-1], "%Y-%m-%d %H:%M") - t0).total_seconds() // 60) + 1
-        rawmin = [(t0 + dt.timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M") for i in range(nm)]
+        # Only minutes with a reading: while the Mac is off or asleep nothing is measured, so that time is left out
+        # rather than drawn as an empty stretch.
+        rawmin = window(r)
+        nm = len(rawmin)
         raw = {s["k"]: [by[s["k"]].get(t) for t in rawmin] for s in STRIPS}
         b = 1 if r == 1 else next((b for b in (1, 2, 5, 10, 15, 30, 60, 120) if nm / b <= 1100), 240)
         minute = rawmin[::b]                               # each point is the busiest minute of its b minutes
@@ -199,7 +199,10 @@ def heat_section(home, today):
         hot = [i for i in range(nm) if (raw["temp"][i] or 0) >= HOT_TEMP or (raw["fan"][i] or 0) >= LOUD_FAN]
         flat = [i for i in range(nm) if (raw["cpu"][i] or 0) > 1]
         has_heat = any(x is not None for x in raw["temp"] + raw["fan"])
-        when = ("Today" if not ml else "In the last 24 hours") if r == 1 else f"In the last {r} days"
+        one_day = rawmin[0][:10] == rawmin[-1][:10]
+        when = (("Today" if rawmin[-1][:10] == dt.date.today().isoformat() else
+                 "On " + dt.datetime.strptime(rawmin[-1][:10], "%Y-%m-%d").strftime("%A %-d %b")) if one_day else
+                "In the last 24 hours") if r == 1 else f"In the last {r} days"
         if has_heat and hot:
             head = f"{when} it ran <em>hot</em> for {_span(len(hot))}"
         elif has_heat:
@@ -215,7 +218,7 @@ def heat_section(home, today):
             for g_, x in apps.get(t, {}).items():
                 share[g_] = share.get(g_, 0) + x
         tot = sum(share.values())
-        who_title = ("Who kept the processors busy while it ran hot" if len(hot) >= 10 else "Who kept the processors busy " + when.lower())
+        who_title = ("Who kept the processors busy while it ran hot" if len(hot) >= 10 else "Who kept the processors busy " + when[0].lower() + when[1:])
         if tot:
             sc = max(share.values())
             rows = "".join(f'<div class=row style="--i:{j}" title="{e(g_)}"><span>{e(g_)}</span><div class=track><b style="--w:{x / sc * 100:.0f}%"></b></div><em>{x / tot * 100:.0f}%</em></div>'

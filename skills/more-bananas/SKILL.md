@@ -15,7 +15,7 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
 
 1. **Recommendation**: the RAM and storage to buy. RAM = highest memory need ever recorded × 1.25, rounded up
    to a size Macs are sold in (16/24/32/36/48/64/96/128 GB); a budget pick = smallest size that covered 99%
-   of working minutes (7am to midnight). Shows the share of working minutes each size would have handled,
+   of working minutes (Monday to Friday, 9am to 7pm by default; see Working hours below). Shows the share of working minutes each size would have handled,
    and how many working days are measured (goal 10).
    Processors: a first-guess chip = fewest cores (8 to 16) that would have kept up in 9 working minutes of 10,
    where "kept up" means the 1-minute load average was at or below the core count. Storage = current disk use × 1.5.
@@ -23,8 +23,11 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
    cause's ladder comes first. The same per-minute labels colour Today, Busy days and Busy hours.
    The buddy explains the answer step by step in a speech bubble while the page's own charts act out each
    step. It opens with what held the Mac up (processors, memory, heat, graphics, disk, network), then walks
-   the bigger cause first: bars regrow, the spill turns into red stripes, the jar is measured. It loops until
-   paused; pause, step and replay buttons; a click or scroll anywhere puts the page back.
+   the bigger cause first: bars regrow, the spill turns into red stripes, the jar is measured. It plays once,
+   then rests on the summary; a pause holds through the page's once-a-minute reload; pause, step and replay
+   buttons; a click, scroll or swipe outside the bubble stops it and puts the page back, and it only
+   scrolls the page when you press its own buttons. The page refreshes itself once a minute, but waits while you
+   are using it and keeps your place, without replaying the entrance animation.
 2. **Today**: two charts, the cause that held the Mac up more first: work waiting for the processors
    against the core count (with who kept them busy), and memory need against the RAM line (the minutes it was
    actively swapping, and what held memory at today's busiest minute). Buttons switch to the last 3, 7 or 30
@@ -64,6 +67,12 @@ Options (all optional, can be re-run any time; re-running upgrades the code and 
 | `--history-from YYYY-MM-DD` | Ignore Claude Code session history before this date (e.g. when earlier sessions were not recorded) |
 
 Settings live in `~/memlog/config.json` and can be edited by hand.
+
+**Working hours.** By default every tab counts only working hours: `"work_hours": [9, 19]` and
+`"work_days": [0, 1, 2, 3, 4]` (Monday is 0) in config.json. A switch at the bottom of every tab opens the
+all-hours page (`~/memlog/memory-report-all.html`), built beside it from the same readings. Time the Mac is off or
+asleep is never counted: nothing is measured then, and the first reading after a gap of more than 5 minutes records
+no swap, disk or network rate instead of an average over the gap.
 
 When helping someone install: run `./install.sh --dock`, confirm the page opened, and tell them where things
 live: the buddy in their Dock (`~/Applications/Memory Monitor.app`) opens the page; the page itself is
