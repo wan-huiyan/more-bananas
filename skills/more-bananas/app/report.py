@@ -112,7 +112,9 @@ def render(v):
     def held(c_):
         return CAUSE_NAMES[c_]
     # Which held it up more over working hours since the processors were first measured. Every tab leads with it.
-    wc = [c_ for t, c_ in cause.items() if cpu_from and t >= cpu_from and 7 <= int(t[11:13]) < 24]
+    HOURS_TXT = v.get("hours_txt", "every hour the Mac was on")
+    WM = "working minutes" if v.get("hours") == "work" else "minutes"   # the readings arrive already cut to these hours
+    wc = [c_ for t, c_ in cause.items() if cpu_from and t >= cpu_from]
     vn, vc = len(wc), {k_: wc.count(k_) for k_ in ("cpu", "both", "mem", "heat")}
     cpu_first = vn >= 60 and vc["cpu"] > vc["mem"]
     def rows_(name, ncol):
@@ -184,7 +186,9 @@ def render(v):
         ml = T[0][:10] != T[-1][:10]
         def lab(t):
             return dt.datetime.strptime(t, "%Y-%m-%d %H:%M").strftime("%a %-d %b, %H:%M") if ml else t[11:]
-        when = "today" if r == 1 else f"in the last {r} days"
+        when = ((("today" if T[-1][:10] == dt.date.today().isoformat() else      # a weekend on the working-hours page
+                  "on " + dt.datetime.strptime(T[-1][:10], "%Y-%m-%d").strftime("%A %-d %b")) if not ml else "in the last 24 hours")
+                if r == 1 else f"in the last {r} days")
         n = len(need)
         pk = max(range(n), key=need.__getitem__)
         peak = need[pk]
@@ -298,7 +302,7 @@ def render(v):
         since_ = mstamp(T_all[ix_[0]]) > mstamp(T_all[-1]) - 1440 * r + 30 and r > 1
         h2 = (f"Processors held it up <em class=nw>{span(cpu_held)}</em> {when}" if cpu_first and cpu_held else
               f"{when[0].upper() + when[1:]} it needed <em>{gb(peak)} GB</em>" if peak > TOTAL else
-              f"{when[0].upper() + when[1:]} it has <em>fitted</em>{' so far' if r == 1 else ''}")
+              f"{when[0].upper() + when[1:]} it has <em>fitted</em>{' so far' if when == 'today' else ''}")
         return f"""<div class=rv data-r={r}{"" if r == 1 else " hidden"}>
 <div class=en><h2 class=big>{h2}</h2>{f'<p class=note style="margin:8px 0 14px">Measured since {e(lab(T_all[ix_[0]]))}; the monitor has not run longer than that yet.</p>' if since_ else ""}</div>
 <p class="lede en" style="--n:1">{"Two things can hold it up, and the one that held it up more comes first. " if has_w else ""}{"The purple line is work waiting for the processors: above its dotted line there was more work than its " + str(cores_n) + " cores could run. " if has_w else ""}The red line is everything held in memory: above the dotted {TOTAL:.0f} GB line it no longer fits, so the striped part sits on the disk, and the drops are the minutes it was moving memory out. {f"Each point is the busiest minute of {b}. " if b > 1 else ""}Hover to read any {"minute" if b == 1 else "point"}.</p>
@@ -344,7 +348,7 @@ def render(v):
 <div class=tip></div>
 <script type=application/json class=mdata>{mdata}</script>
 </div>
-<div class="c en" style="--n:3"><small>What held the memory at {"today&#x27;s busiest minute" if r == 1 else "the busiest minute " + when}, {e(peak_when)}</small><div class=list>{bars(peak_d, peak_t)}</div></div>
+<div class="c en" style="--n:3"><small>What held the memory at {"today&#x27;s busiest minute" if when == "today" else "the busiest minute " + when}, {e(peak_when)}</small><div class=list>{bars(peak_d, peak_t)}</div></div>
 </div>
 <div class="legend en" style="--n:4"><span><i style="background:var(--hot)"></i>memory needed (in RAM + parked on disk)</span><span><i style="background:var(--ram)"></i>in RAM</span><span><i style="background:repeating-linear-gradient(45deg,var(--hot) 0 2px,transparent 2px 5px)"></i>overflow onto disk</span><span>{swap_mins} minutes swapping, {heavy_mins} of them heavy</span></div>
 <div class="legend en" style="--n:5">{CAUSE_KEY}</div>
@@ -576,7 +580,8 @@ def render(v):
 
     # ---------- heatmap panel ----------
     CW, CH, LX, TY = 50, 34, 46, 24
-    HRS = list(range(7, 24))  # working hours only: 00:00-06:59 left out
+    HRS = list(v.get("hrs", range(24)))       # this page's hours: working hours, or all 24
+    WDS = list(v.get("wds", range(7)))        # and days: Monday to Friday, or all seven
     wcell = {k: x for k, x in cell.items() if k[1] in HRS}
     lo_ = min(wcell.values()) if wcell else 0; hi_ = max(wcell.values()) if wcell else 1
     def shade(x):  # one hue, light to dark (dataviz: sequential = single hue)
@@ -584,10 +589,10 @@ def render(v):
         return f"color-mix(in oklab, #e5484d {15 + 85*f:.0f}%, #fff4cc)"
     hm = []
     names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    for wd in range(7):
-        hm.append(f'<text x="{LX-8}" y="{TY + wd*CH + CH*.62:.0f}" text-anchor=end class=tk>{names[wd]}</text>')
+    for row_, wd in enumerate(WDS):
+        hm.append(f'<text x="{LX-8}" y="{TY + row_*CH + CH*.62:.0f}" text-anchor=end class=tk>{names[wd]}</text>')
         for h in HRS:
-            x_, y_ = LX + (h - HRS[0])*CW, TY + wd*CH
+            x_, y_ = LX + (h - HRS[0])*CW, TY + row_*CH
             if (wd, h) in cell:
                 val = cell[(wd, h)]
                 ring = f'<circle cx="{x_ + CW/2 - 1:.0f}" cy="{y_ + CH/2 - 1:.0f}" r="4" fill="#fff"/>' if val > TOTAL else ""
@@ -595,7 +600,7 @@ def render(v):
                           f'<title>{names[wd]} {h:02d}:00–{h:02d}:59: highest need {val:.1f} GB{" (over " + str(int(TOTAL)) + " GB)" if val > TOTAL else ""}</title></g>')
             else:
                 hm.append(f'<rect x="{x_}" y="{y_}" width="{CW-2}" height="{CH-2}" rx="7" class=empty><title>{names[wd]} {h:02d}:00: no reading yet</title></rect>')
-    for h in range(HRS[0], 24, 2):
+    for h in range(HRS[0], HRS[-1] + 1, 2):
         hm.append(f'<text x="{LX + (h - HRS[0])*CW + CW/2 - 1:.0f}" y="{TY - 8}" text-anchor=middle class=tk>{h:02d}:00</text>')
     ccell = {}
     for t, c_ in cause.items():
@@ -604,12 +609,12 @@ def render(v):
         if c_:
             cc[c_] = cc.get(c_, 0) + 1
     hc2 = []
-    for wd in range(7):
+    for row_, wd in enumerate(WDS):
         for h in HRS:
             cc = ccell.get((wd, h))
             if not cc:
                 continue
-            x_, y_ = LX + (h - HRS[0])*CW, TY + wd*CH
+            x_, y_ = LX + (h - HRS[0])*CW, TY + row_*CH
             hk = [k_ for k_ in ("cpu", "both", "mem", "heat") if cc.get(k_)]
             if not hk:
                 hc2.append(f'<rect x="{x_}" y="{y_}" width="{CW-2}" height="{CH-2}" rx="7" class=cz0><title>{names[wd]} {h:02d}:00: nothing held it up ({cc["n"]} minutes)</title></rect>')
@@ -621,13 +626,13 @@ def render(v):
     heat_svg = "".join(hm) + f'<g class=hmc>{"".join(hc2)}</g>'
     seen_hours = sum(1 for (_, h) in cell if h in HRS)   # the same hours the memory view counts, so the switch keeps one total
     held_hours = sum(1 for k_, cc in ccell.items() if k_[1] in HRS and k_ in cell and sum(cc.get(x_, 0) for x_ in ("cpu", "both", "mem", "heat")) >= .1 * cc["n"])
-    heat_w, heat_h = LX + len(HRS)*CW + 4, TY + 7*CH + 6
+    heat_w, heat_h = LX + len(HRS)*CW + 4, TY + len(WDS)*CH + 6
     filled = sum(1 for (_, h) in cell if h in HRS)
 
     # ---------- Recommendation: how often each size would have been enough ----------
     BR = "Browsers Claude drives"
     apps_all = v["apps"]
-    work = [(t, x) for t, x in all_need if 7 <= int(t[11:13]) < 24]
+    work = list(all_need)
     split_t = min((t for t, d_ in apps_all.items() if BR in d_), default=None)
     def fits(sz, vals):
         return sum(x <= sz for _, x in vals) / max(len(vals), 1)
@@ -650,7 +655,7 @@ def render(v):
     # Processors: in how many working minutes would a chip with this many cores have kept up (load average <= cores)?
     # Counts cores only. Newer chips' cores are faster than an older Mac's, so this overstates the need.
     cores = int(cpu_rows[-1][3]) if cpu_rows else 0
-    loadw = [(r[0], float(r[2])) for r in cpu_rows if 7 <= int(r[0][11:13]) < 24]
+    loadw = [(r[0], float(r[2])) for r in cpu_rows]
     cpu_ok = len(loadw) >= 60
     CORE_LADDER = sorted({cores, 10, 12, 14, 16}) if cores else []
     def cfits(c):
@@ -669,7 +674,7 @@ def render(v):
                     f'<div class=track><b style="--w:{max(f_ * 100, 2):.0f}%"></b></div><em>{f_:.0%}</em></div>')
     # The verdict: working minutes since the processors were first measured, by what held them up.
     # The other measures over the same working minutes: did heat slow it, did graphics, disk or network go over their lines?
-    wmin = {t for t, c_ in cause.items() if cpu_from and t >= cpu_from and 7 <= int(t[11:13]) < 24}
+    wmin = {t for t, c_ in cause.items() if cpu_from and t >= cpu_from}
     oth = {"n": 0, "over": 0, "hot": 0, "slowed": 0}
     io_ = {r[0]: r for r in rows_("io.csv", 5)}
     for r in rows_("heat.csv", 6):
@@ -690,14 +695,14 @@ def render(v):
         why_txt = (f"The {big} held it up more often than the {small}. "
                    + ("Processors count as holding it up when more work is waiting than its cores can run; memory when it pushes 100 MB a minute or more to disk. ")
                    + ("Heat counts only when macOS slows the chip down to cool it, which has not happened yet." if not vc["heat"] else "Heat counts when macOS slowed the chip down to cool it."))
-        verdict = (f'<div class="c en verdict" id=rec-why style="--n:2"><small>What held it up, {vn:,} working minutes since '
+        verdict = (f'<div class="c en verdict" id=rec-why style="--n:2"><small>What held it up, {vn:,} {WM} since '
                    f'{dt.datetime.strptime(cpu_from, "%Y-%m-%d %H:%M").strftime("%-d %b")}</small>'
                    f'<div class=vbar role=img aria-label="Processors {vc["cpu"]}, both {vc["both"]}, memory {vc["mem"]}, heat {vc["heat"]} of {vn} minutes">{seg}</div>'
                    f'<div class="legend vkey">{key}</div><p class=note>{why_txt}</p></div>')
     else:
         verdict = ""
 
-    lesson = lesson_html(TOTAL=TOTAL, work=work, wdays=wdays, fits=fits, LADDER=LADDER, peak_ever=peak_ever,
+    lesson = lesson_html(hours_txt=HOURS_TXT, wm=WM, TOTAL=TOTAL, work=work, wdays=wdays, fits=fits, LADDER=LADDER, peak_ever=peak_ever,
                          peak_ever_when=peak_ever_when, target=target, rec=rec, budget=budget, fit16=fit16, disk_used=disk_used,
                          disk_txt=disk_txt, disk_rec=disk_rec, n_wd=n_wd, WD_GOAL=WD_GOAL,
                          cpu=dict(ok=cpu_ok, cores=cores, chip=chip, chip_b=chip_b, up=chip_up, wait=wait_pct, days=cpu_days,
@@ -711,7 +716,7 @@ def render(v):
     else:
         h1_html = (f"This Mac&#x27;s memory is enough;<br>the processors want <em>{chip_b}</em>." if chip_up else
                    f"This Mac&#x27;s <em>{TOTAL:.0f} GB</em> is enough<br>for now.")
-    kick_html = (f"Work waited on the processors in {p_cpu:.0%} of working minutes, and on memory in {p_mem:.0%}." if cpu_first else
+    kick_html = (f"Work waited on the processors in {p_cpu:.0%} of {WM}, and on memory in {p_mem:.0%}." if cpu_first else
                  f"My work has needed up to {peak_ever:.1f} GB of memory. This Mac has {TOTAL:.0f}.")
 
     # ---------- Busy hours: the takeaway ----------
@@ -785,6 +790,18 @@ def render(v):
     br_peak = max((d_.get(BR, 0) for t, d_ in apps_all.items() if t > d7_cut), default=0)
 
     cores_n = int(v.get("cores") or 0)
+    # Working hours or all hours: two pages built from the same readings, one switch at the bottom of every tab.
+    from urllib.parse import quote
+    is_work = v.get("hours") == "work"
+    def hlink(lbl, on, ok, tip):
+        if on:
+            return f'<button class="jt hs" aria-pressed=true title="{e(tip)}">{lbl}</button>'
+        if not ok:
+            return f'<button class="jt hs" disabled title="No readings inside working hours yet">{lbl}</button>'
+        return f'<a class="jt hs" aria-pressed=false title="{e(tip)}" href="file://{quote(v.get("other", ""))}">{lbl}</a>'
+    wt_ = v.get("work_txt", "Monday to Friday, 9am to 7pm")
+    hours_switch = (hlink("Working hours", is_work, v.get("other_ok", True), f"Count only {wt_}")
+                    + hlink("All hours", not is_work, True, "Count every minute the Mac was on"))
     t_on = ranges_on(T_all)                           # Today, then 3, 7 and 30 days once there is that much to show
     heat_sec = heat_section(v["HOME"], T[-1][:10])   # the Hot & slow tab; empty (and no tab) before any reading
     tabs = [("rec", "Recommendation"), ("today", "Today")] + ([("heat", "Hot & slow")] if heat_sec else []) + [("days", "Busy days"), ("hours", "Busy hours"), ("uses", "What uses the Mac" if capps else "What uses memory"), ("claude", "What Claude runs"), ("how", "How this works")]
@@ -931,6 +948,7 @@ svg.jars{{width:100%;max-height:28vh;display:block;overflow:visible}}
 .specs .c{{padding:12px 16px}} .specs .c b{{display:block;font:700 24px/1.1 Fredoka,sans-serif}} .specs .c span{{font-size:13.5px;color:var(--mute)}}
 .specs .c:first-child{{background:var(--fg);color:var(--bg);border-color:var(--fg)}} .specs .c:first-child b{{color:#ffd93b}} .specs .c:first-child span{{color:inherit;opacity:.8}}
 footer{{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 20px 12px;max-width:1240px;width:100%;margin:0 auto;color:var(--mute);font-size:12px}}
+footer .fl{{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;min-width:0}} .hsw{{display:inline-flex;gap:4px;flex:none}} .hsw .jt{{font-size:12px;padding:4px 11px}} a.jt{{text-decoration:none;display:inline-block}} .hs:disabled{{opacity:.4;cursor:default}}
 .nav2{{display:flex;gap:6px}} .nav2 button{{all:unset;cursor:pointer;width:34px;height:34px;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;font:700 16px Fredoka,sans-serif;color:var(--fg)}}
 .nav2 button:hover{{background:var(--banana);color:#1d2a44}}
 details{{position:relative}} summary{{cursor:pointer;color:var(--fg)}}
@@ -988,10 +1006,10 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 </section>
 {verdict}
 <div class=two>
-<div class="c en ladders{" cpufirst" if cpu_first and cpu_ok else ""}" style="--n:2"><div class=lmem><small>Memory: share of working minutes each size would have handled</small><div class="list ladder meml">{ladder}</div>
-<p class=note id=rec-note style="margin-top:10px">{len(work):,} working minutes, 7am to midnight.</p></div>
-{f"""<div class=lcpu id=rec-cpu><small>Processors: share of working minutes a chip with this many cores would have kept up</small><div class="list ladder cpul">{cl_rows}</div>
-<p class=note style="margin-top:10px">{len(loadw):,} working minutes on {cpu_days} working day{"s" if cpu_days != 1 else ""}, so this is a first guess. It counts cores only; newer chips&#x27; cores are faster than this Mac&#x27;s, so it overstates what you need.</p></div>""" if cpu_ok else ""}</div>
+<div class="c en ladders{" cpufirst" if cpu_first and cpu_ok else ""}" style="--n:2"><div class=lmem><small>Memory: share of {WM} each size would have handled</small><div class="list ladder meml">{ladder}</div>
+<p class=note id=rec-note style="margin-top:10px">{len(work):,} minutes measured, {HOURS_TXT}.</p></div>
+{f"""<div class=lcpu id=rec-cpu><small>Processors: share of {WM} a chip with this many cores would have kept up</small><div class="list ladder cpul">{cl_rows}</div>
+<p class=note style="margin-top:10px">{len(loadw):,} {WM} on {cpu_days} working day{"s" if cpu_days != 1 else ""}, so this is a first guess. It counts cores only; newer chips&#x27; cores are faster than this Mac&#x27;s, so it overstates what you need.</p></div>""" if cpu_ok else ""}</div>
 <div class="c en" id=rec-jars style="--n:3"><svg class=jars viewBox="0 -60 1000 440" role=img aria-label="A {TOTAL:.0f} GB jar holding the busiest minute's {peak_ever:.1f} GB, next to a {rec} GB jar holding it with room to spare">{jars}</svg></div>
 </div>
 <div class=specs>
@@ -1030,7 +1048,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 </div></section>
 
 <section class="panel{" bycause" if cpu_first else ""}" id=p-hours role=tabpanel><div class=inner>
-<div class=en><p class=kick>Working hours, 7am to midnight</p><h2 class=big><span class=hl-mem>{TOTAL:.0f} GB ran out in <em>{len(over_cells)} of {filled}</em> hours seen</span><span class=hl-cause>Held up in <em>{held_hours} of {seen_hours}</em> hours seen</span></h2></div>
+<div class=en><p class=kick>{HOURS_TXT[0].upper() + HOURS_TXT[1:]}</p><h2 class=big><span class=hl-mem>{TOTAL:.0f} GB ran out in <em>{len(over_cells)} of {filled}</em> hours seen</span><span class=hl-cause>Held up in <em>{held_hours} of {seen_hours}</em> hours seen</span></h2></div>
 <p class="lede en" style="--n:1"><span class=hl-mem>{hours_take} Each square is one hour of one weekday, darker for more memory needed; a white dot means it went over {TOTAL:.0f} GB.</span><span class=hl-cause>Each square is one hour of one weekday, coloured by what held it up most in that hour; paler means fewer of its minutes were held up, and an hour counts as held up when a tenth of it was.</span> Blank squares have no readings yet.</p>
 <div class="c en hmcard" style="--n:2"><div class=jtabs role=group aria-label="Colour the squares by"><button type=button class="jt hmt" data-hm=cause aria-pressed={"true" if cpu_first else "false"}>What held it up</button><button type=button class="jt hmt" data-hm=mem aria-pressed={"false" if cpu_first else "true"}>Memory needed</button></div>
 <svg class=heat viewBox="0 0 {heat_w} {heat_h}" role=img aria-label="Highest memory needed by weekday and hour, or what held each hour up">{heat_svg}</svg>
@@ -1063,6 +1081,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <div class="c en howc" style="--n:1"><ul>
 <li><b>Every minute</b> a background job reads macOS figures (<code>vm_stat</code>, <code>sysctl</code>, <code>ps</code>) into <code>~/memlog/</code>{', copied to Google Drive every 15 minutes' if cfg.get('drive_backup') else ''}: memory in use, memory on disk, memory and processor share per app, the scripts Claude runs with each one&#x27;s memory and processor share, and processor load. Nothing is sent anywhere else.</li>
 <li><b>Memory needed</b> is memory in use plus memory parked on disk (swap). Swap can keep old data from hours earlier, so this can overstate the real need; the minutes the Mac was actively moving memory to disk are shown separately as the drops on the Today chart.</li>
+<li><b>Working hours or all hours:</b> the switch at the bottom of every tab. Working hours ({e(v.get("work_txt", "Monday to Friday, 9am to 7pm"))}, set in config.json) is the default, and every tab, the recommendation included, then counts only minutes inside them. Time the Mac is off or asleep is never counted: nothing is measured then, and the first reading after a gap records no swap, disk or network rate rather than an average over the night.</li>
 <li><b>The recommendation</b> is the busiest minute ever measured plus a quarter, rounded up to a size Macs come in. The budget pick is the smallest size that would have covered 99% of working minutes. Storage is what is in use now plus half again. The processor pick is the smallest core count that would have kept up in 9 working minutes of 10; it counts cores only, and newer chips&#x27; cores are faster than an older Mac&#x27;s, so it overstates the need.</li>
 <li><b>Processors</b> are measured as work waiting: the 1-minute load average divided by the number of cores. Above 1&times;, more work is waiting than the cores can run, so things slow down. &ldquo;% busy&rdquo; is not used for this because on Apple chips half the cores are slower ones: the fast half can be full while the total reads 50 to 60%.</li>
 <li><b>Every tab leads with what held the Mac up more</b> since the processors were first measured: Today opens on the processors chart or the memory chart, Busy days counts a day as held up after half an hour of it, Busy hours opens on &ldquo;What held it up&rdquo; (an hour counts when a tenth of it was), and What uses the Mac and What Claude runs open on processors or memory. Every one has a switch or a second chart for the other.</li>
@@ -1076,7 +1095,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 </div></section>
 </div>
 
-<footer><span>Updated {e(T[-1])} &middot; scroll, swipe or use the arrow keys</span><div class=nav2><button id=prev aria-label="Previous section">&lsaquo;</button><button id=next aria-label="Next section">&rsaquo;</button></div></footer>
+<footer><div class=fl><span class=hsw role=group aria-label="Which hours to count">{hours_switch}</span><span>Updated {e(v.get("stamp") or T[-1])} &middot; scroll, swipe or use the arrow keys</span></div><div class=nav2><button id=prev aria-label="Previous section">&lsaquo;</button><button id=next aria-label="Next section">&rsaquo;</button></div></footer>
 </div>
 <script>
 (() => {{
@@ -1145,6 +1164,8 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
   }}));
   document.querySelectorAll(".jobs").forEach(box => {{ try {{ const jv = localStorage.getItem("mm-win-" + box.closest(".panel").id);
     const jb = jv && box.querySelector('.jt[data-v="' + jv + '"]'); if (jb) jb.click(); }} catch (_) {{}} }});
+  document.querySelectorAll("a.hs").forEach(a => a.addEventListener("click", ev => {{
+    ev.preventDefault(); const tab = document.querySelector(".tabs [aria-selected=true]"); location.href = a.href.split("#")[0] + (tab && tab.dataset.go ? "#" + tab.dataset.go : location.hash); }}));
   let start = location.hash.slice(1); try {{ start = start || localStorage.getItem("mm-tab"); }} catch (_) {{}}
   // Tighten the header one step at a time until every tab fits (t1: smaller tabs, t2: title and "to disk" go, t3: smaller again, t4: the disk chip goes, t5: tighter still).
   const hdr = document.querySelector("header"), bar = document.querySelector(".tabs");
@@ -1230,7 +1251,7 @@ def add_today_cpu(page):
 
 # ---------- Recommendation: the buddy teaches how it got to the answer ----------
 # Every number comes from the readings. Steps that do not apply to this Mac are left out.
-def lesson_html(*, TOTAL, work, wdays, fits, LADDER, peak_ever, peak_ever_when, target, rec, budget, fit16,
+def lesson_html(*, hours_txt, wm, TOTAL, work, wdays, fits, LADDER, peak_ever, peak_ever_when, target, rec, budget, fit16,
                 disk_used, disk_txt, disk_rec, n_wd, WD_GOAL, cpu):
     def row(sz):
         return f".lad[data-sz='{sz}']" if sz in LADDER else ""
@@ -1244,11 +1265,11 @@ def lesson_html(*, TOTAL, work, wdays, fits, LADDER, peak_ever, peak_ever_when, 
         heat_t = ("Heat made it loud but never made macOS slow it down. " if o["hot"] and not o["slowed"] else
                   f"macOS slowed the chip for heat in {o['slowed']} minutes. " if o["slowed"] else "")
         oth_t = (f"Graphics, disk and network were over their lines in {o['over']} of {o['n']:,} minutes. " if o["n"] else "")
-        why = [("#rec-why", f"First, what held it up. In {cpu['vn']:,} working minutes, work waited on the processors <b>{cpu['p_cpu']:.0%}</b> "
+        why = [("#rec-why", f"First, what held it up. In {cpu['vn']:,} {wm}, work waited on the processors <b>{cpu['p_cpu']:.0%}</b> "
                             f"of the time and on memory <b>{cpu['p_mem']:.0%}</b>. {heat_t}{oth_t}"
                             f"So I start with the {'processors' if first else 'memory'}.", "why", {})]
-    mem = [("#rec-note", (f"Then memory. I watched <b>{len(work):,} working minutes</b>, 7am to midnight, over {nd} day{'s' if nd != 1 else ''}." if first else
-                          f"{'Memory: i' if why else 'I'} watched <b>{len(work):,} working minutes</b>, 7am to midnight, over {nd} day{'s' if nd != 1 else ''}."
+    mem = [("#rec-note", (f"Then memory. I watched <b>{len(work):,} minutes</b>, {hours_txt}, over {nd} day{'s' if nd != 1 else ''}." if first else
+                          f"{'Memory: i' if why else 'I'} watched <b>{len(work):,} minutes</b>, {hours_txt}, over {nd} day{'s' if nd != 1 else ''}."
                           + ("" if why else " Here is how I got from those to my answer.")), "minutes", {"n": len(work)})]
     spill = peak_ever > TOTAL
     mem.append(("#rec-jars", f"The busiest minute, {peak_ever_when}, needed <b>{peak_ever:.1f} GB</b>. "
@@ -1271,7 +1292,7 @@ def lesson_html(*, TOTAL, work, wdays, fits, LADDER, peak_ever, peak_ever_when, 
     if cpu["ok"]:
         cd = cpu["days"]
         proc.append(("#rec-cpu", f"{'The processors' if first else 'Then the processors'}. More work was waiting than this Mac&#x27;s {cpu['cores']} cores could run in "
-                                 f"<b>{cpu['wait']:.0%} of working minutes</b>. "
+                                 f"<b>{cpu['wait']:.0%} of {wm}</b>. "
                                  + (f"A chip with <b>{cpu['chip']} cores</b> would have kept up 9 minutes in 10. " if cpu["chip"] and cpu["up"] else
                                     f"Even {cpu['chip_b'][:-7]} cores would not have kept up 9 minutes in 10. " if cpu["up"] else
                                     "This chip kept up 9 minutes in 10, so it is enough. ")
@@ -1398,6 +1419,15 @@ LESSON_JS = r"""<script>
     const s = JSON.parse(sessionStorage.getItem("mm-lesson") || "null");
     if (s && s.n === n) { i = Math.min(s.i, n - 1); playing = s.playing; t = s.t || 0; }
   } catch (_) {}
+  // The page reloads itself every minute for the newest reading. A pause, or a lesson that has finished, must survive that
+  // reload even when the browser drops session storage or the number of steps changes, so the hold is kept on its own.
+  const HOLD = "mm-lesson-hold", holdFor = 2 * 3600e3;
+  const held = () => { try { if (sessionStorage.getItem(HOLD)) return sessionStorage.getItem(HOLD);
+    const h = JSON.parse(localStorage.getItem(HOLD) || "null"); return h && Date.now() - h.at < holdFor ? h.why : null; } catch (_) { return null; } };
+  const hold = why => { try { if (why) { sessionStorage.setItem(HOLD, why); localStorage.setItem(HOLD, JSON.stringify({ why, at: Date.now() })); }
+    else { sessionStorage.removeItem(HOLD); localStorage.removeItem(HOLD); } } catch (_) {} };
+  const h0 = held();
+  if (h0) { playing = false; if (h0 === "done") { i = n - 1; t = 0; } }
   const dur = k => Math.max(4500, Math.min(9500, 2400 + steps[k].textContent.length * 42));
   const save = () => { try { sessionStorage.setItem("mm-lesson", JSON.stringify({ n, i, playing, t })); } catch (_) {} };
   const label = () => {
@@ -1515,9 +1545,10 @@ LESSON_JS = r"""<script>
     if (svg && !calm) { svg.classList.remove("nod"); void svg.getBoundingClientRect(); svg.classList.add("nod"); }
     aim(); label(); save();
   };
-  L.querySelector(".lp").onclick = () => { playing = false; go(i - 1); };
-  L.querySelector(".ln").onclick = () => { playing = false; go(i + 1); };
-  bt.onclick = () => { if (playing) { playing = false; label(); save(); } else { playing = true; if (i === n - 1) go(0); else { label(); save(); } } };
+  L.querySelector(".lp").onclick = () => { playing = false; hold("paused"); go(i - 1); };
+  L.querySelector(".ln").onclick = () => { playing = false; hold("paused"); go(i + 1); };
+  bt.onclick = () => { if (playing) { playing = false; hold("paused"); label(); save(); }
+    else { playing = true; hold(null); if (i === n - 1) go(0); else { label(); save(); } } };
   go(i, true);
   setInterval(() => {
     const now = performance.now(), dt = now - last; last = now;
@@ -1526,7 +1557,7 @@ LESSON_JS = r"""<script>
     if (!playing || !P.classList.contains("on") || document.hidden) return;
     t += dt; const d = dur(i);
     if (dots[i]) dots[i].style.setProperty("--p", Math.min(t / d, 1).toFixed(3));
-    if (t >= d) go((i + 1) % n);   // loops: after the summary it starts again, until paused
+    if (t >= d) { if (i < n - 1) go(i + 1); else { playing = false; hold("done"); label(); save(); } }   // plays once, then rests on the summary
     else if (Math.floor(t / 1000) !== Math.floor((t - dt) / 1000)) save();
   }, 100);
 })();
