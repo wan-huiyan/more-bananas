@@ -808,7 +808,8 @@ def render(v):
     tab_html = "".join(f'<button role=tab data-go="{k}" aria-controls="p-{k}">{t}</button>' for k, t in tabs)
 
     return add_today_cpu(add_heat(add_lesson(f"""<!doctype html><html lang=en><head><meta charset=utf-8><script>try{{if(sessionStorage.getItem("mm-again"))document.documentElement.classList.add("again")}}catch(_){{}}
-setTimeout(function(){{try{{sessionStorage.setItem("mm-again","1")}}catch(_){{}}location.reload()}},60000)</script>
+(function(){{var act=Date.now(),due=Date.now()+60000;["pointerdown","pointermove","wheel","keydown","touchstart","scroll"].forEach(function(t){{addEventListener(t,function(){{act=Date.now()}},{{passive:true,capture:true}})}});
+setInterval(function(){{if(Date.now()<due||(!document.hidden&&Date.now()-act<45000))return;try{{sessionStorage.setItem("mm-again","1");var p=document.querySelector(".panel.on");if(p)sessionStorage.setItem("mm-scroll",JSON.stringify({{id:p.id,top:p.scrollTop}}))}}catch(_){{}}location.reload()}},5000)}})()</script>
 <style>html{{background:#fff7d6}}</style>
 <script>addEventListener("load",function(){{if(!document.documentElement.classList.contains("again"))return;
 var f=function(){{document.getAnimations().forEach(function(a){{if(a.effect&&a.effect.getTiming().iterations!==Infinity)a.finish()}})}};f();setTimeout(f,50)}})</script>
@@ -957,6 +958,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 /* motion: everything enters on panel change; reduced motion keeps it still */
 @media(prefers-reduced-motion:no-preference){{
  .on .en{{animation:pop .7s cubic-bezier(.3,1.5,.5,1) both;animation-delay:calc(var(--n,0)*90ms)}}
+ .again .on .en,.again .on .ts .need,.again .on .ts .ram,.again .on .hist .col,.again .on .fill{{animation:none}}
  .on .ts .need,.on .ts .ram{{animation:draw 2.4s cubic-bezier(.6,0,.2,1) backwards}}
  .on .drops .dr{{animation:drip 2.6s ease-in var(--d) infinite}}
  .on .hist .col{{animation:stack .6s cubic-bezier(.3,1.6,.5,1) both;animation-delay:calc(var(--i)*12ms)}}
@@ -1105,12 +1107,13 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
   const dotBox = document.createElement("nav"); dotBox.className = "dots"; dotBox.setAttribute("aria-label", "Sections");
   const dots = ids.map((id, j) => {{ const b = document.createElement("button"); b.setAttribute("aria-label", tabs[j].textContent); b.onclick = () => show(j, true); dotBox.appendChild(b); return b; }});
   document.body.appendChild(dotBox);
-  const show = (i, push) => {{
+  const show = (i, push, keep) => {{
     i = (i + ids.length) % ids.length; if (i === cur) return;
+    if (push) document.documentElement.classList.remove("again");
     document.querySelectorAll(".panel").forEach((p, j) => {{ p.classList.toggle("on", j === i); p.classList.toggle("above", j < i); }});
     tabs.forEach((t, j) => t.setAttribute("aria-selected", j === i));
     dots.forEach((d, j) => d.setAttribute("aria-current", j === i));
-    const pn = document.querySelectorAll(".panel")[i]; pn.scrollTop = 0;
+    const pn = document.querySelectorAll(".panel")[i]; if (!keep) pn.scrollTop = 0;
     const t = tabs[i]; ink.style.left = t.offsetLeft + "px"; ink.style.width = t.offsetWidth + "px";
     rider.style.left = (t.offsetLeft + t.offsetWidth / 2 - 10) + "px";
     t.scrollIntoView({{block: "nearest", inline: "center"}});
@@ -1173,7 +1176,10 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
     for (const c of ["t1", "t2", "t3", "t4", "t5"]) {{ if (bar.scrollWidth <= bar.clientWidth + 1) break; hdr.classList.add(c); }} }};
   fitTabs();
   show(Math.max(0, ids.indexOf(start)), false);
-  const refit = () => {{ fitTabs(); const c = cur; cur = -1; show(c, false); }};
+  // After the minute reload, put the reader back where they were reading.
+  try {{ const sc = JSON.parse(sessionStorage.getItem("mm-scroll") || "null"); sessionStorage.removeItem("mm-scroll");
+    const pn = sc && document.getElementById(sc.id); if (pn && pn.classList.contains("on")) {{ pn.scrollTop = sc.top; requestAnimationFrame(() => pn.scrollTop = sc.top); }} }} catch (_) {{}}
+  const refit = () => {{ fitTabs(); const c = cur; cur = -1; show(c, false, true); }};
   addEventListener("resize", refit); if (document.fonts) document.fonts.ready.then(refit);
 
   // Memory charts (one per time range): a buddy walks along the red line; hovering moves it to the point under the pointer.
@@ -1532,28 +1538,31 @@ LESSON_JS = r"""<script>
     try { f(JSON.parse(st.dataset.d || "{}")); } catch (_) {} };
   // Never block use: a click anywhere outside the bubble (or, on a wide screen, a scroll) puts the page back as it was.
   // Not pointerdown: on a phone every scroll starts with one, and the reader has to scroll to reach steps 6 to 8.
-  const back = e => { if (!e.target.closest("#lesson")) reset(); };
-  P.addEventListener("click", back); P.addEventListener("wheel", e => wide() && back(e), { passive: true });
+  // A click, scroll or swipe outside the bubble means the reader wants the page: stop the lesson and put the page back.
+  const back = e => { if (e.target.closest && e.target.closest("#lesson")) return; reset();
+    if (playing) { playing = false; hold("paused"); label(); save(); } };
+  P.addEventListener("click", back); P.addEventListener("wheel", back, { passive: true }); P.addEventListener("touchmove", back, { passive: true });
   let sceneT = null; const later0 = f => { clearTimeout(sceneT); sceneT = setTimeout(f, calm ? 0 : 120); };
-  const go = (k, keepT) => {
+  const go = (k, keepT, user) => {
     tgts(i).forEach(el => el.classList.remove("lit"));
     i = Math.max(0, Math.min(n - 1, k)); if (!keepT) t = 0;
     steps.forEach((s, j) => s.classList.toggle("on", j === i));
     dots.forEach((d, j) => { d.classList.toggle("on", j === i); d.classList.toggle("done", j < i); d.style.setProperty("--p", 0); });
     tgts(i).forEach(el => el.classList.add("lit"));
-    show(); later0(scene);
+    if (user) show();                  // only the reader's own step, replay or play scrolls the page
+    if (user || playing) later0(scene); // a paused or finished lesson leaves the page as it is
     if (svg && !calm) { svg.classList.remove("nod"); void svg.getBoundingClientRect(); svg.classList.add("nod"); }
     aim(); label(); save();
   };
-  L.querySelector(".lp").onclick = () => { playing = false; hold("paused"); go(i - 1); };
-  L.querySelector(".ln").onclick = () => { playing = false; hold("paused"); go(i + 1); };
+  L.querySelector(".lp").onclick = () => { playing = false; hold("paused"); go(i - 1, false, true); };
+  L.querySelector(".ln").onclick = () => { playing = false; hold("paused"); go(i + 1, false, true); };
   bt.onclick = () => { if (playing) { playing = false; hold("paused"); label(); save(); }
-    else { playing = true; hold(null); if (i === n - 1) go(0); else { label(); save(); } } };
+    else { playing = true; hold(null); if (i === n - 1) go(0, false, true); else { label(); save(); } } };
   go(i, true);
   setInterval(() => {
     const now = performance.now(), dt = now - last; last = now;
     aim();
-    const on = P.classList.contains("on"); if (on && !wasOn) { setTimeout(show, 450); later0(scene); } if (!on && wasOn) reset(); wasOn = on;
+    const on = P.classList.contains("on"); if (on && !wasOn && playing) later0(scene); if (!on && wasOn) reset(); wasOn = on;
     if (!playing || !P.classList.contains("on") || document.hidden) return;
     t += dt; const d = dur(i);
     if (dots[i]) dots[i].style.setProperty("--p", Math.min(t / d, 1).toFixed(3));

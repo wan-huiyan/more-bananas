@@ -8,7 +8,7 @@
       "name": "more-bananas",
       "source": "./",
       "description": "Always-on Mac memory monitor with a measured RAM recommendation and a cute self-updating page.",
-      "version": "1.7.0"
+      "version": "1.7.1"
     }
   ]
 }

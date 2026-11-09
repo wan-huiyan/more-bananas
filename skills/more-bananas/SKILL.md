@@ -25,7 +25,9 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
    step. It opens with what held the Mac up (processors, memory, heat, graphics, disk, network), then walks
    the bigger cause first: bars regrow, the spill turns into red stripes, the jar is measured. It plays once,
    then rests on the summary; a pause holds through the page's once-a-minute reload; pause, step and replay
-   buttons; a click or scroll anywhere puts the page back.
+   buttons; a click, scroll or swipe outside the bubble stops it and puts the page back, and it only
+   scrolls the page when you press its own buttons. The page refreshes itself once a minute, but waits while you
+   are using it and keeps your place, without replaying the entrance animation.
 2. **Today**: two charts, the cause that held the Mac up more first: work waiting for the processors
    against the core count (with who kept them busy), and memory need against the RAM line (the minutes it was
    actively swapping, and what held memory at today's busiest minute). Buttons switch to the last 3, 7 or 30
