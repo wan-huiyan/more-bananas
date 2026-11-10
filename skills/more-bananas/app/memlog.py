@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 HOME = os.path.expanduser("~/memlog")
@@ -21,6 +22,7 @@ APPS = os.path.join(HOME, "apps.csv")            # time, app group, GB
 LIVE = os.path.join(HOME, "live.csv")            # time, MB/min to disk, MB/min back, compressor GB, wired GB, compressed GB
 OUT = os.path.join(HOME, "memory-report.html")   # background jobs may not write to ~/Desktop; a Desktop link points here
 sys.path.insert(0, HOME)
+from storage_history import derive_rates, import_cleanup_receipt, record_volume
 
 try:
     cfg = json.load(open(os.path.join(HOME, "config.json")))
@@ -224,18 +226,6 @@ try:
     prev = json.load(open(state_p))
 except Exception:
     prev = None
-mins = max((time.time() - prev["t"]) / 60, 1) if prev else 1
-# After a sleep or a shutdown the counters cover the time the Mac was off too. That is not work, so the first reading
-# after a gap of more than 5 minutes records no swap, disk or network rate rather than an average over the night.
-if mins > 5:
-    prev = None
-
-
-def rate(k):  # MB per minute; 0 on the first run, or after a restart resets the counters
-    return max(cnt[k] - prev[k], 0) * page / 2**20 / mins if prev and cnt[k] >= prev[k] else 0.0
-
-
-out_mb, in_mb = rate("Swapouts"), rate("Swapins")
 comp_gb = cnt["Pages occupied by compressor"] * page / 2**30
 squeezed_gb = cnt["Pages stored in compressor"] * page / 2**30
 wired_gb = cnt["Pages wired down"] * page / 2**30
@@ -261,30 +251,60 @@ if os.access(heat_bin, os.X_OK):
 gm_ = re.search(r'"Device Utilization %"=(\d+)', try_sh("ioreg", "-r", "-d", "1", "-c", "IOAccelerator"))
 gpu_pct = float(gm_.group(1)) if gm_ else -1.0
 st_ = try_sh("ioreg", "-c", "IOBlockStorageDriver", "-r", "-k", "Statistics", "-d", "1")
-io_now = {"disk_r": sum(int(x) for x in re.findall(r'"Bytes \(Read\)"=(\d+)', st_)),
-          "disk_w": sum(int(x) for x in re.findall(r'"Bytes \(Write\)"=(\d+)', st_)), "net_i": 0, "net_o": 0}
-for l_ in try_sh("netstat", "-ib").splitlines()[1:]:   # one <Link> row per interface; byte columns counted from the end
+reads_ = re.findall(r'"Bytes \(Read\)"=(\d+)', st_)
+writes_ = re.findall(r'"Bytes \(Write\)"=(\d+)', st_)
+net_ = try_sh("netstat", "-ib")
+io_now = {"disk_r": sum(map(int, reads_)) if reads_ else None,
+          "disk_w": sum(map(int, writes_)) if writes_ else None,
+          "net_i": 0 if net_ else None, "net_o": 0 if net_ else None}
+for l_ in net_.splitlines()[1:]:   # one <Link> row per interface; byte columns counted from the end
     f_ = l_.split()
     if len(f_) >= 10 and f_[2].startswith("<Link") and not f_[0].startswith("lo"):
         io_now["net_i"] += int(f_[-5]); io_now["net_o"] += int(f_[-2])
 
 
-def brate(k):  # MB per minute from a byte counter; 0 on the first run or after a restart resets it
-    return max(io_now[k] - prev[k], 0) / 2**20 / mins if prev and k in prev and io_now[k] >= prev[k] else 0.0
-
-
-io_rates = [brate(k) for k in ("disk_r", "disk_w", "net_i", "net_o")]
+_boot = int(re.search(r"sec = (\d+)", sh("sysctl", "-n", "kern.boottime")).group(1))
+sample_epoch = time.time()
+snapshot = {"epoch": sample_epoch, "boot": str(_boot), "counters": {
+    "swap_out": cnt["Swapouts"] * page, "swap_in": cnt["Swapins"] * page, **io_now}}
+interval = derive_rates(prev, snapshot)
+out_mb, in_mb = interval["rates"]["swap_out"], interval["rates"]["swap_in"]
+io_rates = [interval["rates"][k] for k in ("disk_r", "disk_w", "net_i", "net_o")]
+def rate_text(value):
+    return "" if value is None else f"{value:.1f}"
 with open(HEAT, "a") as f:
     f.write(f"{stamp},{heat_state},{fan_rpm},{fan_max},{chip_c:.1f},{gpu_pct:.0f}\n")
 with open(IO, "a") as f:
-    f.write(stamp + "," + ",".join(f"{x:.1f}" if prev else "" for x in io_rates) + "\n")
+    f.write(stamp + "," + ",".join(rate_text(x) for x in io_rates) + "\n")
 with open(APPCPU, "a") as f:
     for g_, x_ in sorted(cpu_by_group.items(), key=lambda kv: -kv[1]):
         if x_ >= 0.5:
             f.write(f"{stamp},{g_},{x_:.1f}\n")
-json.dump({"t": time.time(), "Swapouts": cnt["Swapouts"], "Swapins": cnt["Swapins"], **io_now}, open(state_p, "w"))
+fd_, tmp_ = tempfile.mkstemp(prefix='.last-', dir=HOME)
+try:
+    with os.fdopen(fd_, 'w') as state_:
+        json.dump(snapshot, state_)
+    os.replace(tmp_, state_p)
+finally:
+    if os.path.exists(tmp_):
+        os.unlink(tmp_)
+with open(os.path.join(HOME, 'intervals.jsonl'), 'a') as f:
+    f.write(json.dumps({'at': dt.datetime.fromtimestamp(sample_epoch, dt.timezone.utc).isoformat(),
+                        'start_epoch': prev.get('epoch') if isinstance(prev, dict) else None,
+                        'end_epoch': sample_epoch, 'boot': snapshot['boot'],
+                        'reason': interval['reason'], 'counters': interval['reasons']}, separators=(',', ':')) + '\n')
 with open(LIVE, "a") as f:
-    f.write(f"{stamp},{out_mb:.1f},{in_mb:.1f},{comp_gb:.2f},{wired_gb:.2f},{squeezed_gb:.2f}\n")
+    f.write(f"{stamp},{rate_text(out_mb)},{rate_text(in_mb)},{comp_gb:.2f},{wired_gb:.2f},{squeezed_gb:.2f}\n")
+try:
+    record_volume(HOME, '/System/Volumes/Data', snapshot['boot'], sample_epoch)
+except OSError as exc:
+    print(f'Could not record Data-volume history: {exc}', file=sys.stderr)
+receipt_paths = cfg.get('cleanup_receipts', [])
+for receipt_path in receipt_paths if isinstance(receipt_paths, list) else []:
+    try:
+        import_cleanup_receipt(receipt_path, os.path.join(HOME, 'cleanup-events.jsonl'))
+    except (OSError, ValueError, TypeError) as exc:
+        print(f'Cleanup receipt not imported: {exc}', file=sys.stderr)
 
 # ---------- what the page needs ----------
 def page_data(home):
@@ -301,9 +321,9 @@ def page_data(home):
     need = [U[i] + S[i] for i in range(len(rows))]
     pk = max(range(len(rows)), key=lambda i: need[i])
     lv = [l.strip().split(",") for l in open(live) if l.count(",") == 5][-60 * 24 * 31:] if os.path.exists(live) else []
-    lv = lv or [[T[-1], "0", "0", "0", "0", "0"]]
+    lv = [r for r in lv if r[1]]
     LO, LT = [float(r[1]) for r in lv], [r[0] for r in lv]
-    lpk = max(range(len(lv)), key=lambda i: LO[i])
+    lpk = max(range(len(lv)), key=lambda i: LO[i]) if lv else None
     apps = {}
     for l in open(apps_p) if os.path.exists(apps_p) else ():
         if l.count(",") >= 2:
@@ -336,12 +356,13 @@ hs = os.path.join(HOME, "history_sessions.csv")
 if not os.path.exists(hs) or time.strftime("%M") == "00":
     subprocess.run([sys.executable, os.path.join(HOME, "backfill_sessions.py")], capture_output=True)
 globals().update(page_data(HOME))
-mood, word, tone = (("calm", "calm", "#34d399") if out_mb < 5 else
+mood, word, tone = (("unknown", "swap rate unavailable", "#8793a9") if out_mb is None else
+                    ("calm", "calm", "#34d399") if out_mb < 5 else
                     ("tight", "swapping a little", "#fbbf24") if out_mb < 100 else
                     ("over", "swapping hard", "#fb7185"))
 if mood == "calm" and load1 > cores:  # memory is calm but the processors have more work than cores: amber, not green
     tone = "#fbbf24"
-mouth = {"calm": "M12 21 Q16 25 20 21", "tight": "M12 22 L20 22", "over": "M12 23 Q16 19 20 23"}[mood]
+mouth = {"calm": "M12 21 Q16 25 20 21", "tight": "M12 22 L20 22", "over": "M12 23 Q16 19 20 23", "unknown": "M12 22 L20 22"}[mood]
 fav = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="2" y="2" width="28" height="28" rx="9" fill="{tone.replace("#", "%23")}"/>'
        f'<circle cx="12" cy="14" r="2" fill="%23fff"/><circle cx="20" cy="14" r="2" fill="%23fff"/>'
        f'<path d="{mouth}" stroke="%23fff" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>')
@@ -379,7 +400,6 @@ _dn = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sund
 _ds = sorted(WORK_D)
 work_txt = (f"{_dn[_ds[0]]} to {_dn[_ds[-1]]}" if _ds == list(range(_ds[0], _ds[-1] + 1)) else ", ".join(_dn[d] for d in _ds)) + f", {_hr(_h0)} to {_hr(_h1)}"
 swapped_total_gb = cnt["Swapouts"] * page / 2**30
-_boot = int(re.search(r"sec = (\d+)", sh("sysctl", "-n", "kern.boottime")).group(1))
 _h = (time.time() - _boot) / 3600
 uptime_txt = f"{_h / 24:.1f} days since the last restart" if _h >= 48 else f"{_h:.0f} hours since the last restart"
 
@@ -414,6 +434,6 @@ if cfg.get("drive_backup"):
     if drives and (int(time.strftime("%M")) % 15 == 0 or not os.path.isdir(os.path.join(drives[0], "Memory Monitor"))):
         dest = os.path.join(drives[0], "Memory Monitor")
         os.makedirs(dest, exist_ok=True)
-        for name in ("mem.csv", "apps.csv", "live.csv", "cpu.csv", "cpu_apps.csv", "tools_cpu.csv", "heat.csv", "io.csv", "tools.csv", "history_sessions.csv", "memory-report.html", "memory-report-all.html", "config.json"):
+        for name in ("mem.csv", "apps.csv", "live.csv", "cpu.csv", "cpu_apps.csv", "tools_cpu.csv", "heat.csv", "io.csv", "tools.csv", "history_sessions.csv", "storage.jsonl", "intervals.jsonl", "cleanup-events.jsonl", "memory-report.html", "memory-report-all.html", "config.json"):
             if os.path.exists(os.path.join(HOME, name)):
                 shutil.copy2(os.path.join(HOME, name), dest)

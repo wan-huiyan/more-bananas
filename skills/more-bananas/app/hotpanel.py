@@ -74,6 +74,8 @@ def minute_causes(home):
     state = {r[0]: r[1] for r in _rows(os.path.join(home, "heat.csv"), 6) if r[1]}
     out = {}
     for t in set(swap) | set(wait):
+        if t in swap and swap[t] is None:
+            continue  # Missing swap data is not a zero-pressure minute.
         m, p = (swap.get(t) or 0) >= SWAP_HARD, (wait.get(t) or 0) > 1
         out[t] = "heat" if state.get(t) in SLOWING else "both" if m and p else "mem" if m else "cpu" if p else ""
     return out, (min(wait) if wait else None)
@@ -95,9 +97,9 @@ def heat_section(home, today):
         by["gpu"][r[0]] = _num(r[5])
     for r in _rows(os.path.join(home, "io.csv"), 5):
         a, b = _num(r[1]), _num(r[2])
-        by["disk"][r[0]] = (a or 0) + (b or 0) if a is not None or b is not None else None
+        by["disk"][r[0]] = a + b if a is not None and b is not None else None
         c, d = _num(r[3]), _num(r[4])
-        by["net"][r[0]] = (c or 0) + (d or 0) if c is not None or d is not None else None
+        by["net"][r[0]] = c + d if c is not None and d is not None else None
     for r in _rows(os.path.join(home, "live.csv"), 6):
         by["swap"][r[0]] = _num(r[1])
     apps = {}

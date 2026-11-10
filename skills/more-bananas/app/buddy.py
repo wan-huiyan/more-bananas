@@ -2,9 +2,11 @@
 floating bananas, and a click-me burst. memlog.py calls theme(page, mood, word)."""
 
 MOUTH = {"calm": "M84 150 Q100 166 116 150",
+         "unknown": "M86 154 L114 154",
          "tight": "M86 154 L114 154",
          "over": "M86 160 Q100 146 114 160"}
 SAYS = {"calm": "Hello! Lots of room.",
+        "unknown": "Waiting for the next reading.",
         "tight": "Hmm... getting squishy.",
         "over": "Beep beep! Too full!"}
 
@@ -115,7 +117,7 @@ JS = """<script>
 </script>"""
 
 def favicon(mood):
-    mouth = {"calm": "M12 25 Q16 28 20 25", "tight": "M12 26 L20 26", "over": "M12 27 Q16 24 20 27"}[mood]
+    mouth = {"calm": "M12 25 Q16 28 20 25", "unknown": "M12 26 L20 26", "tight": "M12 26 L20 26", "over": "M12 27 Q16 24 20 27"}[mood]
     return ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='6' y='2' width='20' height='29' rx='10' fill='%23ffd93b'/>"
             "<path d='M6 22h20v-1 0 1a10 10 0 0 1-20 0z' fill='%232f6fb5'/><rect x='6' y='11' width='20' height='3' fill='%23333a45'/>"
             "<circle cx='16' cy='12.5' r='6' fill='%23fff' stroke='%239aa3ad' stroke-width='2'/><circle cx='16' cy='13' r='2.6' fill='%237a4b23'/>"

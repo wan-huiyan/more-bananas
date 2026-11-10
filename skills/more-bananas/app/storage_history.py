@@ -161,4 +161,16 @@ def render_storage(home):
 
 
 def record_volume(home, path, boot, epoch=None):
-    return None
+    epoch = time.time() if epoch is None else epoch
+    sample = {'at': dt.datetime.fromtimestamp(epoch, dt.timezone.utc).isoformat(),
+              'epoch': epoch, 'boot': boot, 'volume': os.fspath(path)}
+    try:
+        sample.update(volume_reading(os.statvfs(path)))
+        sample.update(device=os.stat(path).st_dev, status='ok')
+    except (OSError, ValueError):
+        sample['status'] = 'unavailable'
+    with open(Path(home) / 'storage.jsonl', 'a', encoding='utf-8') as output:
+        fcntl.flock(output, fcntl.LOCK_EX)
+        output.write(json.dumps(sample, separators=(',', ':')) + '\n')
+        output.flush()
+    return sample

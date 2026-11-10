@@ -5,6 +5,7 @@ import collections
 import datetime as dt
 from pathlib import Path
 import os
+import sys
 from types import SimpleNamespace
 import json
 import tempfile
@@ -142,3 +143,24 @@ class MissingRateReportTests(unittest.TestCase):
                 self.fail('an unknown interval must not break the report')
             self.assertEqual(result['LO'], [2.5])
             self.assertEqual(result['LT'], ['2024-01-01 12:01'])
+
+    def test_full_report_and_buddy_handle_no_valid_swap_rate(self):
+        sys.path.insert(0, str(path.parent))
+        try:
+            import report
+            import buddy
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                stamp = dt.datetime.now().strftime('%Y-%m-%d %H:%M')
+                (root / 'mem.csv').write_text((stamp + ',12,1,1,1,1\n') * 60)
+                (root / 'live.csv').write_text(stamp + ',,,2,3,4\n')
+                v = self.page_data(directory)
+                v.update(HOME=directory, TOTAL_GB=24, out_mb=None, cfg={}, terms=1, mood='unknown',
+                         tone='#8793a9', fav='', by_group={}, now_d={}, cores=8, load1=1,
+                         swapped_total_gb=0, comp_gb=2, wired_gb=3, squeezed_gb=4)
+                page = buddy.theme(report.render(v), 'unknown', [])
+                self.assertIn('Swap rate unavailable', page)
+                self.assertIn('desired concurrent work is not yet sized', page)
+                self.assertIn('Storage history &amp; cleanup evidence', page)
+        finally:
+            sys.path.pop(0)

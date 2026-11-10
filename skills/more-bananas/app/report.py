@@ -10,6 +10,7 @@ import json
 import os
 
 from hotpanel import CAUSE_NAMES, _span as span, add_heat, heat_section, minute_causes
+from storage_history import render_storage
 
 
 def gb(x):
@@ -57,9 +58,9 @@ def render(v):
         ix = list(range(max(0, len(T) - 24 * 60), len(T)))
     T, need, U, S, N = [T[i] for i in ix], [need[i] for i in ix], [U[i] for i in ix], [S[i] for i in ix], [N[i] for i in ix]
     pk = max(range(len(need)), key=need.__getitem__)
-    lv_ix = [i for i, t in enumerate(LT) if t >= T[0]] or [len(LT) - 1]
+    lv_ix = [i for i, t in enumerate(LT) if t >= T[0]]
     LO, LT = [LO[i] for i in lv_ix], [LT[i] for i in lv_ix]
-    lpk = max(range(len(LO)), key=LO.__getitem__)
+    lpk = max(range(len(LO)), key=LO.__getitem__) if LO else None
 
     peak = need[pk]
     over_by = peak - TOTAL
@@ -91,18 +92,19 @@ def render(v):
     for t, x in all_need:
         d_ = dt.datetime.strptime(t, "%Y-%m-%d %H:%M"); k_ = (d_.weekday(), d_.hour)
         cell[k_] = max(cell.get(k_, 0), x)
-    calm = out_mb < 5
+    calm = out_mb is not None and out_mb < 5
     # The line says what the Mac is doing this minute: memory (pushing to disk) AND the processors, because a hot,
     # loud Mac with nothing going to disk is busy processors, and "quiet" alone would be wrong.
     # Processors are measured as work waiting: the 1-minute load average over the core count. Above 1, more work is
     # waiting than the cores can run. (% busy hides this on Apple chips, where half the cores are slower ones.)
     wait_now = v["load1"] / v["cores"] if v.get("load1") is not None and v.get("cores") else None
     cpu_top = sorted(((x, g) for g, x in (v.get("cpu_by_group") or {}).items() if x >= 3), reverse=True)[:3]
-    disk_now = "nothing is being pushed to disk" if calm else f"it is pushing {out_mb:.0f} MB a minute to disk"
+    disk_now = ("memory swap rate is unavailable" if out_mb is None else
+                "nothing is being pushed to disk" if calm else f"it is pushing {out_mb:.0f} MB a minute to disk")
     if wait_now is not None and wait_now > 1:
         who = f"; busiest: {', '.join(f'{g} {x:.0f}%' for x, g in cpu_top)}" if cpu_top else ""
         status_line = (f"Right now the processors have {wait_now:.1f} times the work its {v['cores']} cores can run{who}, enough to run warm, loud and slow. "
-                       + ("Memory is fine: nothing is being pushed to disk." if calm else f"And {disk_now}."))
+                       + ("No memory swap-out was observed." if calm else f"And {disk_now}."))
     elif calm:
         status_line = "Right now it is quiet: nothing is being pushed to disk" + (", and the processors are keeping up." if wait_now is not None else ".")
     else:
@@ -128,7 +130,7 @@ def render(v):
     for r in rows_("tools_cpu.csv", 4):
         tjc.setdefault(r[0], {})[(r[1], r[2])] = float(r[3])
     peak_when = dt.datetime.strptime(T[pk], "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M")
-    swap_when = dt.datetime.strptime(LT[lpk], "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M")
+    swap_when = dt.datetime.strptime(LT[lpk], "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M") if lpk is not None else 'unavailable'
 
     CAUSE_KEY = "".join(f'<span><i class="cz {k_}"></i>{CAUSE_NAMES[k_]}</span>' for k_ in ("cpu", "both", "mem", "heat"))
 
@@ -195,11 +197,12 @@ def render(v):
         peak_t = T_all[max(ix_, key=lambda i: need_all[i])]   # the real busiest minute, not a bucket's start
         peak_when = dt.datetime.strptime(peak_t, "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M" if r == 1 else "%a %-d %b, %H:%M")
         swap_by_t = {t: x for t, x in zip(LT_all, LO_all) if t >= T_all[ix_[0]]}
-        LO = list(swap_by_t.values()) or [0]
+        LO = list(swap_by_t.values())
         lpk_t = max(swap_by_t, key=swap_by_t.get) if swap_by_t else T[-1]
         swap_when = dt.datetime.strptime(lpk_t, "%Y-%m-%d %H:%M").strftime("%-d %b, %H:%M")
         heavy_mins, swap_mins = sum(x >= 100 for x in LO), sum(x >= 5 for x in LO)
-        gswap = [max((swap_by_t.get(T_all[i], 0) for i in g), default=0) for g in gs]
+        gswap = [max((swap_by_t[T_all[i]] for i in g if T_all[i] in swap_by_t), default=None) for g in gs]
+        gmissing = [any(T_all[i] not in swap_by_t for i in g) for g in gs]
         top = max(max(need), TOTAL) * 1.18
         def X(i): return i * W / max(n - 1, 1)
         def Y(val): return PAD + (H - PAD) - val * (H - PAD) / top
@@ -213,10 +216,10 @@ def render(v):
         for i in range(0, n, max(n // 6, 1)):
             ticks += f'<text x="{X(i):.1f}" y="{H + 20}" class=tk text-anchor="middle">{e(T[i][11:] if not ml else T[i][5:10].replace("-", "/") + " " + T[i][11:])}</text>'
         drops = []
-        smax = max(max(LO), 50)
+        smax = max(max(LO, default=0), 50)
         for i, t in enumerate(T):
             x = gswap[i]
-            if x >= 5:
+            if x is not None and x >= 5:
                 h = 10 + 50 * x / smax
                 drops.append(f'<g class=dr style="--d:{(i % 7) * .3:.1f}s"><rect x="{X(i)-3:.1f}" y="0" width="6" height="{h:.1f}" rx="3"/>'
                              f'<circle cx="{X(i):.1f}" cy="{h + 4:.1f}" r="3.2"/><title>{e(lab(t))}: {x:.0f} MB pushed to disk{f" (the most in {b} minutes)" if b > 1 else ""}</title></g>')
@@ -297,7 +300,7 @@ def render(v):
         cdata = json.dumps({"t": T, "w": [None if x is None else round(x, 2) for x in wv], "apps": capg, "b": b, "ml": ml,
                             "top": ctop, "ch": CH_, "cores": cores_n}).replace("</", "<\\/")
         mdata = json.dumps({"t": T, "need": [round(x, 2) for x in need], "ram": [round(x, 2) for x in U], "b": b, "pk": pk, "top": round(top, 3),
-                            "swap": [round(x) for x in gswap], "cause": tc, "cn": CAUSE_NAMES}).replace("</", "<\\/")
+                            "swap": [round(x) if x is not None else None for x in gswap], "missing": gmissing, "cause": tc, "cn": CAUSE_NAMES}).replace("</", "<\\/")
         peak_d = v["apps"].get(peak_t, {})
         since_ = mstamp(T_all[ix_[0]]) > mstamp(T_all[-1]) - 1440 * r + 30 and r > 1
         h2 = (f"Processors held it up <em class=nw>{span(cpu_held)}</em> {when}" if cpu_first and cpu_held else
@@ -340,7 +343,7 @@ def render(v):
 <g class=walker>{mini(0, 0, 40, mood=mood)}</g>
 {ticks}
 <g class=drops transform="translate(0 {H + 30})">{"".join(drops)}</g>
-<text x=0 y={H + 104} class=tk>Drops: {"minutes" if b == 1 else "stretches"} it pushed memory to disk (worst: {max(LO):.0f} MB at {e(swap_when)})</text>
+<text x=0 y={H + 104} class=tk>Drops: {"minutes" if b == 1 else "stretches"} with observed swap-out ({f'worst: {max(LO):.0f} MB at {e(swap_when)}' if LO else 'no valid swap-rate samples'})</text>
 <g class=peek>{mini(W - 34, H + 2, 46, flip=True, mood=mood)}</g>
 <rect class=czb x=0 y={CB} width={W} height=16 rx=4 />{"".join(band)}
 <text x=0 y={CB + 36} class=tk>What held it up, {"minute by minute (blank: nothing did)" if b == 1 else f"{b} minutes at a time (fainter: held up for fewer of them)"}{(" &middot; " + band_note) if band_note else ""}</text>
@@ -376,7 +379,7 @@ def render(v):
     if os.path.exists(lp_):
         for l in open(lp_):
             f_ = l.strip().split(",")
-            if len(f_) == 6 and float(f_[1]) >= 100:
+            if len(f_) == 6 and f_[1] and float(f_[1]) >= 100:
                 heavy[f_[0][:10]] = heavy.get(f_[0][:10], 0) + 1
     dmem = v["day_mem"]
     OH = HH * .55
@@ -710,12 +713,12 @@ def render(v):
                                   p_cpu=p_cpu, p_mem=p_mem, others=oth))
     # The headline names the bigger cause first.
     if rec > TOTAL:
-        h1_html = (f"Get a chip with <em>{chip_b}</em>,<br>{rec} GB of memory<br>and {disk_txt} of storage." if chip_up and cpu_first else
-                   f"Get <em>{rec} GB</em> of memory,<br>a chip with {chip_b}<br>and {disk_txt} of storage." if chip_up else
-                   f"Get <em>{rec} GB</em> of memory<br>and {disk_txt} of storage.")
+        h1_html = (f"Consider a chip with <em>{chip_b}</em>,<br>{rec} GB of memory<br>and {disk_txt} of storage." if chip_up and cpu_first else
+                   f"Consider <em>{rec} GB</em> of memory,<br>a chip with {chip_b}<br>and {disk_txt} of storage." if chip_up else
+                   f"Consider <em>{rec} GB</em> of memory<br>and {disk_txt} of storage.")
     else:
-        h1_html = (f"This Mac&#x27;s memory is enough;<br>the processors want <em>{chip_b}</em>." if chip_up else
-                   f"This Mac&#x27;s <em>{TOTAL:.0f} GB</em> is enough<br>for now.")
+        h1_html = (f"Observed work suggests<br><em>{chip_b}</em> processors." if chip_up else
+                   f"Observed work on this <em>{TOTAL:.0f} GB</em> Mac<br>under current limits.")
     kick_html = (f"Work waited on the processors in {p_cpu:.0%} of {WM}, and on memory in {p_mem:.0%}." if cpu_first else
                  f"My work has needed up to {peak_ever:.1f} GB of memory. This Mac has {TOTAL:.0f}.")
 
@@ -996,13 +999,14 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <pattern id=hatch width=10 height=10 patternUnits=userSpaceOnUse patternTransform="rotate(45)"><rect width=10 height=10 fill="var(--hot)" opacity=".16"/><line x1=0 y1=0 x2=0 y2=10 stroke="var(--hot)" stroke-width=3 opacity=".5"/></pattern>
 </defs></svg>
 <div class=app>
-<header><div class=brand><i></i>{"Too small a Mac" if rec > TOTAL or chip_up else "Mac memory check"}</div><nav class=tabs role=tablist aria-label="Sections">{tab_html}<span class=ink></span><svg class=rider viewBox="0 0 60 92" aria-hidden=true>{mini(30, 90, 90)}</svg></nav><span class=live title="Memory written out to the disk in the last minute">{out_mb:.0f} MB/min<span class=lx> to disk</span></span></header>
+<header><div class=brand><i></i>{"Too small a Mac" if rec > TOTAL or chip_up else "Mac memory check"}</div><nav class=tabs role=tablist aria-label="Sections">{tab_html}<span class=ink></span><svg class=rider viewBox="0 0 60 92" aria-hidden=true>{mini(30, 90, 90)}</svg></nav><span class=live title="Memory written out to the disk in the last minute">{f'{out_mb:.0f} MB/min to disk' if out_mb is not None else 'Swap rate unavailable'}</span></header>
 <div class=stage>
 
 <section class=panel id=p-rec role=tabpanel><div class=inner>
 <section class=hero>
 <p class="kick en">{kick_html}</p>
 <h1 class=en id=rec-h1>{h1_html}</h1>
+<p class="note en">Estimate for work observed under current limits. Desired concurrent work is not yet sized; delayed and blocked tests are not measured. RAM plus swap can include older parked data. Pressure indicators do not measure blocked queue time.</p>
 {f'<p class="note en" style="margin:4px 0 0">The chip is a first guess from {cpu_days} working day{"s" if cpu_days != 1 else ""} of processor readings; memory and storage rest on {n_wd}.</p>' if chip_up else ""}
 {lesson}
 </section>
@@ -1016,11 +1020,12 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 </div>
 <div class=specs>
 {f'<div class="c en" id=rec-chip style="--n:5"><b>{chip_b}</b><span>processor, a first guess from {cpu_days} working day{"s" if cpu_days != 1 else ""}: more work was waiting than its {cores} cores could run in {wait_pct:.0%} of working minutes.</span></div>' if cpu_ok and cpu_first else ""}
-<div class="c en" id=rec-mem style="--n:4"><b>{rec} GB</b><span>memory, or {budget} GB if budget is tight: enough today, little room to grow.</span></div>
+<div class="c en" id=rec-mem style="--n:4"><b>{rec} GB</b><span>estimate for observed work under current limits; desired concurrent work is not yet sized. Delayed or blocked work is not measured. The RAM-plus-swap estimate can include old parked data.</span></div>
 {f'<div class="c en" id=rec-chip style="--n:5"><b>{chip_b}</b><span>processor, a first guess from {cpu_days} working day{"s" if cpu_days != 1 else ""}: more work was waiting than its {cores} cores could run in {wait_pct:.0%} of working minutes.</span></div>' if cpu_ok and not cpu_first else ""}
 <div class="c en" id=rec-disk style="--n:5"><b>{disk_txt}</b><span>storage: {disk_used:.0f} GB of this Mac&#x27;s {disk_total:.0f} GB is in use, plus half again for growth.</span></div>
 <div class="c en" id=rec-days style="--n:6"><b>{n_wd} of {WD_GOAL}</b><span>working days measured so far{f"; the processors on {cpu_days}" if cpu_rows else ""}.</span></div>
 </div>
+{render_storage(v["HOME"])}
 </div></section>
 
 <section class="panel rpanel" id=p-today role=tabpanel><div class=inner>
@@ -1199,7 +1204,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
       tip.style.left = (r.left - b.left + (X(i) - vb.x) * r.width / vb.width) + "px";
       tip.style.top = (r.top - b.top + (Y(D.need[i]) - vb.y - 40) * r.height / vb.height) + "px";
       const one = D.b === 1, span = one ? "this minute" : `these ${{D.b}} minutes`;
-      tip.innerHTML = `<b>${{D.t[i].slice(5).replace("-", "/")}}${{one ? "" : ", busiest of " + D.b + " min"}}</b><br><i style="background:var(--hot)"></i>needed ${{D.need[i].toFixed(1)}} GB<br><i style="background:var(--ram)"></i>in RAM ${{D.ram[i].toFixed(1)}} GB<br>${{D.swap[i] ? D.swap[i] + " MB pushed to disk" + (one ? "" : " at most") : "no swapping " + span}}<br>${{D.cause[i] ? `<i class="cz ${{D.cause[i]}}"></i>held up by ${{D.cn[D.cause[i]]}}` : "nothing held it up"}}`;
+      tip.innerHTML = `<b>${{D.t[i].slice(5).replace("-", "/")}}${{one ? "" : ", busiest of " + D.b + " min"}}</b><br><i style="background:var(--hot)"></i>observed RAM + swap ${{D.need[i].toFixed(1)}} GB<br><i style="background:var(--ram)"></i>in RAM ${{D.ram[i].toFixed(1)}} GB<br>${{D.swap[i] === null ? "swap rate unavailable" : D.swap[i] ? D.swap[i] + " MB pushed to disk" + (one ? "" : " observed maximum") : "no swap-out observed " + span}}${{D.missing[i] && D.swap[i] !== null ? " (some intervals unavailable)" : ""}}<br>${{D.cause[i] ? `<i class="cz ${{D.cause[i]}}"></i>pressure signal: ${{D.cn[D.cause[i]]}}` : D.missing[i] ? "not fully measured" : "no pressure signal observed"}}`;
     }};
     const pick = ev => {{
       const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
