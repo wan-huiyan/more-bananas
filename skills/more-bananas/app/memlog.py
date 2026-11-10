@@ -323,7 +323,11 @@ for receipt_path in receipt_paths if isinstance(receipt_paths, list) else []:
 def page_data(home):
     """Everything the page reads from the per-minute logs in `home`. None if it holds less than an hour of readings."""
     log, live, apps_p = os.path.join(home, "mem.csv"), os.path.join(home, "live.csv"), os.path.join(home, "apps.csv")
-    allrows = [l.strip().split(",") for l in open(log) if l.count(",") == 5] if os.path.exists(log) else []
+    if os.path.exists(log):
+        with open(log) as source:
+            allrows = [l.strip().split(",") for l in source if l.count(",") == 5]
+    else:
+        allrows = []
     if len(allrows) < 60:
         return None
     first_reading = allrows[0][0]
@@ -333,7 +337,11 @@ def page_data(home):
     N = [int(r[5]) for r in rows]
     need = [U[i] + S[i] for i in range(len(rows))]
     pk = max(range(len(rows)), key=lambda i: need[i])
-    lv = [l.strip().split(",") for l in open(live) if l.count(",") == 5][-60 * 24 * 31:] if os.path.exists(live) else []
+    if os.path.exists(live):
+        with open(live) as source:
+            lv = [l.strip().split(",") for l in source if l.count(",") == 5][-60 * 24 * 31:]
+    else:
+        lv = []
     lv = [r for r in lv if r[1]]
     LO, LT = [float(r[1]) for r in lv], [r[0] for r in lv]
     lpk = max(range(len(lv)), key=lambda i: LO[i]) if lv else None

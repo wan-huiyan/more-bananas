@@ -38,7 +38,8 @@ CAUSE_NAMES = {"cpu": "processors", "mem": "memory", "both": "memory and process
 
 def _rows(path, ncol):
     try:
-        return [l.rstrip("\n").split(",") for l in open(path) if l.count(",") == ncol - 1]
+        with open(path) as source:
+            return [l.rstrip("\n").split(",") for l in source if l.count(",") == ncol - 1]
     except OSError:
         return []
 
