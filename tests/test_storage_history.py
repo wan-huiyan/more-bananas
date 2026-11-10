@@ -1,6 +1,10 @@
 """Missing readings, restarted counters and cleanup provenance must stay honest."""
 import importlib.util
+import ast
+import collections
+import datetime as dt
 from pathlib import Path
+import os
 from types import SimpleNamespace
 import json
 import tempfile
@@ -88,3 +92,25 @@ class EvidenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 storage.import_cleanup_receipt(source, log)
             self.assertFalse(log.exists())
+
+
+class MissingRateReportTests(unittest.TestCase):
+    def page_data(self, directory):
+        source = path.with_name('memlog.py')
+        module = ast.parse(source.read_text())
+        function = next(node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == 'page_data')
+        namespace = {'collections': collections, 'dt': dt, 'os': os}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec'), namespace)
+        return namespace['page_data'](directory)
+
+    def test_unknown_swap_rate_does_not_become_zero_or_break_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'mem.csv').write_text('2024-01-01 12:00,12,1,1,1,1\n' * 60)
+            (root / 'live.csv').write_text('2024-01-01 12:00,,,2,3,4\n2024-01-01 12:01,2.5,1,2,3,4\n')
+            try:
+                result = self.page_data(directory)
+            except ValueError:
+                self.fail('an unknown interval must not break the report')
+            self.assertEqual(result['LO'], [2.5])
+            self.assertEqual(result['LT'], ['2024-01-01 12:01'])
