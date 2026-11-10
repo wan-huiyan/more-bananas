@@ -52,9 +52,9 @@ def normalize_cleanup_receipt(receipt, digest):
         return None
     status = receipt.get('status')
     if (not isinstance(status, str) or not status.startswith('RESOURCE_END_') or not status.endswith('_COMPLETE')
-            or receipt.get('runtimeEntered') is False or receipt.get('originalExit') != 0
-            or receipt.get('originalEOF') is not True or receipt.get('unconfirmedDeletions') != 0
-            or receipt.get('independentVerifierExit') != 0 or receipt.get('independentVerifierEOF') is not True):
+            or receipt.get('runtimeEntered') is False or type(receipt.get('originalExit')) is not int or receipt['originalExit'] != 0
+            or receipt.get('originalEOF') is not True or type(receipt.get('unconfirmedDeletions')) is not int or receipt['unconfirmedDeletions'] != 0
+            or type(receipt.get('independentVerifierExit')) is not int or receipt['independentVerifierExit'] != 0 or receipt.get('independentVerifierEOF') is not True):
         return None
     fields = ('actualDeletedLogicalBytes', 'actualDeletedAllocatedEntryBytes',
               'availableBeforeBytes', 'actorAvailableAfterBytes')
