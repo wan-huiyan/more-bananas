@@ -108,6 +108,19 @@ class EvidenceTests(unittest.TestCase):
             self.assertIn('0.20 GB', page)
             self.assertNotIn('recovered 1.20', page.lower())
 
+    def test_volume_sampling_records_real_values_and_missing_path_as_unknown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage.record_volume(root, root, 'boot-a', epoch=1000)
+            storage.record_volume(root, root / 'does-not-exist', 'boot-a', epoch=1060)
+            self.assertTrue((root / 'storage.jsonl').exists())
+            first, missing = [json.loads(line) for line in (root / 'storage.jsonl').read_text().splitlines()]
+            self.assertEqual(first['status'], 'ok')
+            self.assertEqual(first['boot'], 'boot-a')
+            self.assertGreater(first['total_bytes'], 0)
+            self.assertEqual(missing['status'], 'unavailable')
+            self.assertNotIn('available_bytes', missing)
+
 
 class MissingRateReportTests(unittest.TestCase):
     def page_data(self, directory):

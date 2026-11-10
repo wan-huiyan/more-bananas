@@ -1,12 +1,16 @@
 """Helpers for volume history, rate validity and verified cleanup records."""
 import datetime as dt
+from collections import deque
 import fcntl
 import hashlib
+import html
 import json
 import math
 import os
 import re
 import stat
+import time
+from pathlib import Path
 
 
 def derive_rates(previous, current):
@@ -114,4 +118,47 @@ def import_cleanup_receipt(source, log):
 
 
 def render_storage(home):
-    return ''
+    def records(name, limit):
+        try:
+            with open(Path(home) / name, encoding='utf-8') as source:
+                lines = deque(source, maxlen=limit)
+            values = []
+            for line in lines:
+                try:
+                    value = json.loads(line)
+                    if isinstance(value, dict):
+                        values.append(value)
+                except ValueError:
+                    continue
+            return values
+        except OSError:
+            return []
+    def gb(value):
+        return f'{value / 1e9:.2f} GB' if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else 'unknown'
+    rows = records('storage.jsonl', 43200)
+    latest = rows[-1] if rows else {}
+    if latest.get('status') == 'ok':
+        available = gb(latest.get('available_bytes'))
+        stamp = html.escape(str(latest.get('at', 'unknown')))
+        usage = f'<b>{available} available</b> on the Data volume at {stamp}; filesystem free {gb(latest.get("free_bytes"))}, total {gb(latest.get("total_bytes"))}.'
+    else:
+        usage = '<b>Data-volume availability is unknown.</b> No successful current sample is available.'
+    recent = [row['available_bytes'] for row in rows if row.get('status') == 'ok'
+              and isinstance(row.get('epoch'), (int, float)) and 0 <= time.time() - row['epoch'] <= 86400
+              and isinstance(row.get('available_bytes'), int)]
+    recent_note = f' Lowest observed available in the last 24 hours: {gb(min(recent))}.' if recent else ' No valid samples in the last 24 hours.'
+    events = records('cleanup-events.jsonl', 1000)[-5:]
+    items = []
+    for event in reversed(events):
+        scope = html.escape(str(event.get('scope', 'cleanup')))
+        stamp = html.escape(str(event.get('at', 'unknown')))
+        items.append(f'<li>{stamp} &middot; {scope}: {gb(event.get("deleted_logical_bytes"))} logical and {gb(event.get("deleted_allocated_entry_bytes"))} allocated-entry deleted; proof {gb(event.get("proof_logical_bytes"))} logical and {gb(event.get("proof_allocated_entry_bytes"))} allocated-entry; observed shared available-space change {gb(event.get("observed_shared_available_delta_bytes"))}.</li>')
+    details = '<ul>' + ''.join(items) + '</ul>' if items else '<p>No completed cleanup receipts have been imported.</p>'
+    return (f'<div class="c en"><h3>Storage history &amp; cleanup evidence</h3><p>{usage}{recent_note}</p>'
+            '<p>Available and free are different filesystem counters. Purgeable space is not measured. '
+            'Changes in shared APFS availability do not identify a cause or prove exclusive recovery; '
+            'disk read/write traffic is not retained file growth. Gaps are unknown.</p>' + details + '</div>')
+
+
+def record_volume(home, path, boot, epoch=None):
+    return None
