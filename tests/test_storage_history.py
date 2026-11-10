@@ -5,6 +5,8 @@ import collections
 import datetime as dt
 from pathlib import Path
 import os
+import shutil
+import subprocess
 import sys
 from types import SimpleNamespace
 import json
@@ -167,3 +169,44 @@ class MissingRateReportTests(unittest.TestCase):
                 self.assertIn('Storage history &amp; cleanup evidence', page)
         finally:
             sys.path.pop(0)
+
+
+class CollectorIntegrationTests(unittest.TestCase):
+    def test_collector_records_unknown_first_interval_then_valid_interval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / 'memlog'
+            home.mkdir()
+            for name in ('storage_history.py', 'report.py', 'hotpanel.py', 'buddy.py', 'backfill_sessions.py'):
+                shutil.copyfile(path.with_name(name), home / name)
+            (home / 'icon').mkdir()
+            (home / 'icon' / 'fav64.b64').write_text('AA==')
+            stamp = dt.datetime.now().strftime('%Y-%m-%d %H:%M')
+            (home / 'mem.csv').write_text((stamp + ',12,1,1,1,1\n') * 60)
+            (home / 'cpu.csv').write_text(stamp + ',5,1,8\n')
+            bindir = root / 'bin'
+            bindir.mkdir()
+            fake = bindir / 'fake'
+            fake.write_text('''#!/usr/bin/env python3
+import os,sys
+name=os.path.basename(sys.argv[0]); key=sys.argv[-1]
+values={'hw.memsize':str(24*2**30),'vm.swapusage':'total = 4096.00M used = 512.00M free = 3584.00M','kern.memorystatus_level':'50','hw.ncpu':'8','vm.loadavg':'{ 1.0 1.0 1.0 }','kern.boottime':'{ sec = 1000, usec = 0 }'}
+if name=='sysctl': print(values[key])
+elif name=='vm_stat': print('page size of 16384 bytes\\nPages occupied by compressor: 100.\\nPages stored in compressor: 300.\\nPages wired down: 200.\\nSwapouts: 10.\\nSwapins: 5.')
+elif name=='ioreg': print('"Bytes (Read)"=100 "Bytes (Write)"=100')
+elif name=='netstat': print('Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll')
+''')
+            fake.chmod(0o755)
+            for name in ('sysctl', 'vm_stat', 'ps', 'ioreg', 'netstat'):
+                (bindir / name).symlink_to(fake)
+            env = dict(os.environ, HOME=str(root), PATH=str(bindir) + os.pathsep + os.environ['PATH'])
+            command = [sys.executable, str(path.with_name('memlog.py'))]
+            for _ in range(2):
+                run = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(run.returncode, 0, run.stderr)
+            intervals = [json.loads(line) for line in (home / 'intervals.jsonl').read_text().splitlines()]
+            self.assertEqual([item['reason'] for item in intervals], ['no_previous', 'ok'])
+            rows = (home / 'live.csv').read_text().splitlines()
+            self.assertEqual(rows[-2].split(',')[1:3], ['', ''])
+            self.assertEqual(rows[-1].split(',')[1:3], ['0.0', '0.0'])
+            self.assertTrue((home / 'memory-report.html').exists())
