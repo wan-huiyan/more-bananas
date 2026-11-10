@@ -38,7 +38,20 @@ def sh(*a):
 TOTAL_GB = int(sh("sysctl", "-n", "hw.memsize")) / 2**30
 swap = float(sh("sysctl", "-n", "vm.swapusage").split()[5].rstrip("M")) / 1024
 free_pct = int(sh("sysctl", "-n", "kern.memorystatus_level"))
+# Match executable paths, not command arguments: simulator apps and runtime
+# services can otherwise look like Safari, system processes or developer tools.
+def is_ios_simulator(command):
+    return command.startswith((
+        "/Library/Developer/CoreSimulator/",
+        "/Library/Developer/PrivateFrameworks/CoreSimulator.framework/",
+        os.path.expanduser("~/Library/Developer/CoreSimulator/"),
+    )) or (command.startswith("/Applications/Xcode") and
+           ("/Library/Developer/CoreSimulator/" in command.split(" --", 1)[0] or
+            ".simruntime/Contents/Resources/RuntimeRoot/" in command.split(" --", 1)[0]))
+
+
 GROUPS = [  # first match wins; order matters
+    ("iOS simulator", is_ios_simulator),
     ("Claude Code sessions", lambda c: "/claude-code/" in c or c.split()[0] == "claude" or c.split()[0].endswith("/claude")),
     ("Claude desktop app", lambda c: "/Claude.app/" in c),
     ("Browsers Claude drives", lambda c: False),  # set below: Chrome started by Playwright and other test tools
@@ -369,9 +382,8 @@ fav = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="2"
 now_d = apps.get(stamp, by_group)
 sess = sorted(sessions, key=lambda x: -x[1])
 
-# Working hours: by default the page counts only the minutes inside them (Monday to Friday, 9am to 7pm; config.json
-# can change both). The readings are filtered into their own folder and the same page is built from it, so every
-# tab, the recommendation included, sees only working minutes. The all-hours page is built beside it.
+# The default page includes all recorded hours. A separate working-hours page is built from
+# filtered readings; work_hours and work_days in config.json can change that filter.
 WORK_H = cfg.get("work_hours", [9, 19])
 WORK_D = set(cfg.get("work_days", [0, 1, 2, 3, 4]))     # Monday is 0
 _wd = {}
@@ -410,19 +422,18 @@ from buddy import theme    # noqa: E402
 crowd = [{"name": g, "gb": round(gb, 2), "cpu": round(cpu_by_group.get(g, 0), 1), "kind": "app"} for g, gb in sorted(now_d.items(), key=lambda kv: -kv[1])
          if g != "Claude Code sessions" and (gb >= 0.1 or cpu_by_group.get(g, 0) >= 1)]
 crowd += [{"name": short(folders.get(p_, "unknown folder")), "gb": round(gb, 2), "cpu": round(pcpu.get(p_, 0) / ncores, 1), "kind": "claude"} for p_, gb in sess]
-OUT_ALL = os.path.join(HOME, "memory-report-all.html")
+OUT_ALL = os.path.join(HOME, "memory-report-all.html")  # retain existing bookmarks
+OUT_WORK = os.path.join(HOME, "memory-report-work.html")
 wdata = page_data(WDIR)
-ctx = dict(locals())               # the module's namespace; render() reads it and sets yard_measure
+ctx = dict(locals())
 ctx.update(storage_home=HOME, hours="all", hours_txt="every hour the Mac was on", other_ok=wdata is not None,
-           here=OUT_ALL, other=OUT, hrs=list(range(24)), wds=list(range(7)))
-pages = [(OUT_ALL, ctx)]
-if wdata:                          # the default page: working hours only
+           here=OUT, other=OUT_WORK, hrs=list(range(24)), wds=list(range(7)))
+pages = [(OUT, ctx), (OUT_ALL, dict(ctx, here=OUT_ALL))]
+if wdata:
     wctx = dict(ctx, **wdata)
-    wctx.update(HOME=WDIR, hours="work", hours_txt=work_txt, here=OUT, other=OUT_ALL,
+    wctx.update(HOME=WDIR, hours="work", hours_txt=work_txt, here=OUT_WORK, other=OUT,
                 hrs=list(range(_h0, _h1)), wds=_ds, days=[d for d in wdata["days"] if dt.date.fromisoformat(d).weekday() in WORK_D])
-    pages.insert(0, (OUT, wctx))
-else:                              # no working-hours readings yet: the all-hours page is also the default
-    pages.append((OUT, dict(ctx, here=OUT, other=OUT)))
+    pages.append((OUT_WORK, wctx))
 for out_, c_ in pages:
     html_page = theme(render(c_), mood, crowd, c_.get("yard_measure", "mem"))
     open(out_ + ".tmp", "w").write(html_page)
@@ -434,6 +445,6 @@ if cfg.get("drive_backup"):
     if drives and (int(time.strftime("%M")) % 15 == 0 or not os.path.isdir(os.path.join(drives[0], "Memory Monitor"))):
         dest = os.path.join(drives[0], "Memory Monitor")
         os.makedirs(dest, exist_ok=True)
-        for name in ("mem.csv", "apps.csv", "live.csv", "cpu.csv", "cpu_apps.csv", "tools_cpu.csv", "heat.csv", "io.csv", "tools.csv", "history_sessions.csv", "storage.jsonl", "intervals.jsonl", "cleanup-events.jsonl", "memory-report.html", "memory-report-all.html", "config.json"):
+        for name in ("mem.csv", "apps.csv", "live.csv", "cpu.csv", "cpu_apps.csv", "tools_cpu.csv", "heat.csv", "io.csv", "tools.csv", "history_sessions.csv", "storage.jsonl", "intervals.jsonl", "cleanup-events.jsonl", "memory-report.html", "memory-report-all.html", "memory-report-work.html", "config.json"):
             if os.path.exists(os.path.join(HOME, name)):
                 shutil.copy2(os.path.join(HOME, name), dest)

@@ -78,14 +78,14 @@ def render(v):
     peak_ever_t, peak_ever = max(all_need, key=lambda x: x[1])
     days_measured = len({t[:10] for t, _ in all_need})
     HEADROOM = 1.25
-    SIZES = [16, 24, 32, 36, 48, 64, 96, 128]
+    SIZES = [8, 16, 24, 32, 36, 48, 64, 128]
     target = peak_ever * HEADROOM
     rec = next((x for x in SIZES if x >= target), SIZES[-1])
     nxt = next((x for x in SIZES if x > rec), rec)
     disk = shutil.disk_usage("/")
     disk_used, disk_total = disk.used / 1e9, disk.total / 1e9
-    disk_rec = next((x for x in (512, 1000, 2000, 4000) if x >= disk_used * 1.5), 4000)
-    disk_txt = "1 TB" if disk_rec == 1000 else "2 TB" if disk_rec == 2000 else "4 TB" if disk_rec == 4000 else "512 GB"
+    disk_rec = next((x for x in (256, 512, 1000, 2000, 4000, 8000, 16000) if x >= disk_used * 1.5), 16000)
+    disk_txt = f"{disk_rec // 1000} TB" if disk_rec >= 1000 else f"{disk_rec} GB"
     peak_ever_when = dt.datetime.strptime(peak_ever_t, "%Y-%m-%d %H:%M").strftime("%a %-d %b, %H:%M")
     # Weekday x hour heatmap of the highest memory need seen in that hour.
     cell = {}
@@ -579,7 +579,7 @@ def render(v):
                 f'<text x="{cx}" y="{base + 34}" text-anchor=middle class=jlabel>{label}</text>'
                 f'<text x="{cx}" y="{base + 56}" text-anchor=middle class=tk>{sub}</text></g>')
     jars = jar(260, TOTAL, peak_ever, f"This Mac: {TOTAL:.0f} GB", f"the busiest minute needed {peak_ever:.1f} GB", peak_ever > TOTAL) + \
-           jar(740, rec, peak_ever, f"Recommended: {rec} GB", "the same busiest minute", False)
+           jar(740, rec, peak_ever, f"{'Memory target' if target <= max(SIZES) else 'Largest listed'}: {rec} GB", "the same busiest minute", peak_ever > rec)
 
     # ---------- heatmap panel ----------
     CW, CH, LX, TY = 50, 34, 46, 24
@@ -639,17 +639,18 @@ def render(v):
     split_t = min((t for t, d_ in apps_all.items() if BR in d_), default=None)
     def fits(sz, vals):
         return sum(x <= sz for _, x in vals) / max(len(vals), 1)
-    LADDER = sorted({16, 24, 32, 36, 48, 64, int(round(TOTAL))})
+    LADDER = sorted({*SIZES, int(round(TOTAL))})
     budget = next((x for x in LADDER if fits(x, work) >= .99), rec)
     fit16 = fits(TOTAL, work)
     wdays = sorted({t[:10] for t, _ in work})
-    n_wd = sum(1 for d in wdays if dt.date.fromisoformat(d).weekday() < 5)
+    n_wd = len(wdays) if v.get("hours") == "all" else sum(1 for d in wdays if dt.date.fromisoformat(d).weekday() < 5)
+    day_kind = "calendar" if v.get("hours") == "all" else "working"
     WD_GOAL = 10
     ladder = ""
     for sz in LADDER:
         f_ = fits(sz, work)
-        tag = " &middot; this Mac" if sz == TOTAL else " &middot; recommended" if sz == rec else " &middot; budget pick" if sz == budget else ""
-        ladder += (f'<div class="row lad{" me" if sz == rec else ""}" data-sz="{sz}" style="--i:{LADDER.index(sz)}"><span><b>{sz} GB</b>{tag}</span>'
+        tag = " &middot; this Mac" if sz == TOTAL else " &middot; memory target" if sz == rec and target <= max(SIZES) else " &middot; budget pick" if sz == budget else ""
+        ladder += (f'<div class="row lad{" me" if sz == rec and target <= max(SIZES) else ""}" data-sz="{sz}" style="--i:{LADDER.index(sz)}"><span><b>{sz} GB</b>{tag}</span>'
                    f'<div class=track><b style="--w:{max(f_ * 100, 2):.0f}%"></b></div><em>{f_:.0%}</em></div>')
     cpu_rows = []
     cp_ = os.path.join(v["HOME"], "cpu.csv")
@@ -660,14 +661,14 @@ def render(v):
     cores = int(cpu_rows[-1][3]) if cpu_rows else 0
     loadw = [(r[0], float(r[2])) for r in cpu_rows]
     cpu_ok = len(loadw) >= 60
-    CORE_LADDER = sorted({cores, 10, 12, 14, 16}) if cores else []
+    CORE_LADDER = sorted({cores, 6, 10, 12, 15, 18}) if cores else []
     def cfits(c):
         return sum(l_ <= c for _, l_ in loadw) / max(len(loadw), 1)
     CHIP_COVER = .9   # the pick keeps up in 9 working minutes of 10: waiting work slows things down, it does not stall them
-    chip = next((c for c in CORE_LADDER if cfits(c) >= CHIP_COVER), None) if cpu_ok else cores
+    chip = next((c for c in (6, 10, 12, 15, 18) if cfits(c) >= CHIP_COVER), None) if cpu_ok else None
     chip_up = cpu_ok and (chip is None or chip > cores)
     chip_b = f"{chip} cores" if chip else f"{CORE_LADDER[-1]}+ cores"
-    cpu_days = len({t[:10] for t, _ in loadw if dt.date.fromisoformat(t[:10]).weekday() < 5})
+    cpu_days = len({t[:10] for t, _ in loadw if v.get("hours") == "all" or dt.date.fromisoformat(t[:10]).weekday() < 5})
     wait_pct = 1 - cfits(cores) if cpu_ok else 0
     cl_rows = ""
     for k_, c in enumerate(CORE_LADDER):
@@ -675,6 +676,55 @@ def render(v):
         tag = " &middot; this Mac" if c == cores else " &middot; first pick" if c == chip else ""
         cl_rows += (f'<div class="row cad{" me" if c == chip and chip_up else ""}" data-c="{c}" style="--i:{k_}"><span><b>{c} cores</b>{tag}</span>'
                     f'<div class=track><b style="--w:{max(f_ * 100, 2):.0f}%"></b></div><em>{f_:.0%}</em></div>')
+    # Actual current Apple configurations, checked 9 November 2026. CPU count
+    # is only a load comparison, not a forecast of performance on another chip.
+    # (name, CPU cores, GPU cores, permitted memory, maximum SSD in GB)
+    catalog = [
+        ("MacBook Neo A18 Pro", 6, 5, (8,), 512),
+        ("MacBook Air M5", 10, 10, (16, 24, 32), 4000),
+        ("14-inch MacBook Pro M6", 12, 12, (16, 24, 32), 4000),
+        ("MacBook Pro M5 Pro", 15, 16, (24, 48), 4000),
+        ("MacBook Pro M5 Pro", 18, 20, (24, 48, 64), 4000),
+        ("MacBook Pro PROLED M5 Max", 18, 32, (36,), 16000),
+        ("MacBook Pro PROLED M5 Max", 18, 40, (48, 64, 128), 16000),
+    ]
+    storage_target = disk_used * 1.5
+    choices = [(memory, ncpu, index, name, gpu, max_ssd)
+               for index, (name, ncpu, gpu, sizes, max_ssd) in enumerate(catalog)
+               for memory in sizes if memory >= target and max_ssd >= storage_target
+               and (not cpu_ok or cfits(ncpu) >= CHIP_COVER)]
+    choice = min(choices) if choices else None
+    # A dated, like-for-like 14-inch Liquid XDR / 2TB price comparison.
+    # It applies only when both exact configurations meet the same estimate;
+    # these are reference prices, not a live or universal price ranking.
+    value_pick = False
+    if choice and choice[3] == "MacBook Pro PROLED M5 Max" and choice[0] == 36 and disk_rec == 2000:
+        pro = next((c for c in choices if c[3] == "MacBook Pro M5 Pro" and c[1] == 15 and c[0] == 48), None)
+        if pro:
+            choice = pro
+            value_pick = True
+    if choice:
+        model_mem, model_cpu, _, model_name, model_gpu, _ = choice
+        min_disk = 256 if model_name == "MacBook Neo A18 Pro" else 512 if model_name == "MacBook Air M5" else 2000 if "M5 Max" in model_name else 1000
+        model_disk = max(disk_rec, min_disk)
+        model_disk_txt = f"{model_disk // 1000} TB" if model_disk >= 1000 else f"{model_disk} GB"
+        model_html = (f"<b>{model_name}</b> &middot; {model_cpu}-core CPU, {model_gpu}-core GPU, "
+                      f"{model_mem} GB memory. This is a compatible configuration, not a performance guarantee.")
+    else:
+        model_html = ("No listed configuration meets every estimate. Review the workload and "
+                      "storage needs before choosing a Mac.")
+    if value_pick:
+        model_html += (" Value comparison: the 14-inch M5 Pro, 15-core CPU, 48 GB and 2 TB "
+                       "was <a href='https://restockowl.com/en/uk/education'>listed at £3,599 on 11 Oct</a>; the 14-inch M5 Max, 18-core CPU, "
+                       "36 GB and 2 TB was <a href='https://ee.co.uk/products/macbook-pro-m5-max-14-inch'>listed at £4,099</a>. Both references are for Liquid XDR "
+                       "displays, not PROLED. The Max has more CPU and GPU cores; verify current prices and your needs.")
+    else:
+        model_html += " Selection prioritises the smallest fitting memory and then core count; it is not a price comparison."
+    model_html += (" CPU estimates compare core counts only; core types and speeds differ. "
+                   "Check Apple for current configurations and prices. Catalogue checked 9 Nov 2026.")
+    model_html += (" This assessment covers only work that actually ran under the current safeguards. "
+                   "Tests blocked or delayed by memory or concurrency guards are not recorded here, "
+                   "so these readings cannot establish the memory needed to run them together.")
     # The verdict: working minutes since the processors were first measured, by what held them up.
     # The other measures over the same working minutes: did heat slow it, did graphics, disk or network go over their lines?
     wmin = {t for t, c_ in cause.items() if cpu_from and t >= cpu_from}
@@ -707,7 +757,7 @@ def render(v):
 
     lesson = lesson_html(hours_txt=HOURS_TXT, wm=WM, TOTAL=TOTAL, work=work, wdays=wdays, fits=fits, LADDER=LADDER, peak_ever=peak_ever,
                          peak_ever_when=peak_ever_when, target=target, rec=rec, budget=budget, fit16=fit16, disk_used=disk_used,
-                         disk_txt=disk_txt, disk_rec=disk_rec, n_wd=n_wd, WD_GOAL=WD_GOAL,
+                         disk_txt=disk_txt, disk_rec=disk_rec, n_wd=n_wd, WD_GOAL=WD_GOAL, model_summary=(f"{model_name}, {model_cpu}-core CPU, {model_mem} GB memory and {model_disk_txt} storage" if choice else ""),
                          cpu=dict(ok=cpu_ok, cores=cores, chip=chip, chip_b=chip_b, up=chip_up, wait=wait_pct, days=cpu_days,
                                   rows=[[c, round(cfits(c) * 100)] for c in CORE_LADDER], first=cpu_first, vn=vn,
                                   p_cpu=p_cpu, p_mem=p_mem, others=oth))
@@ -719,13 +769,22 @@ def render(v):
     else:
         h1_html = (f"Observed work suggests<br><em>{chip_b}</em> processors." if chip_up else
                    f"Observed work on this <em>{TOTAL:.0f} GB</em> Mac<br>under current limits.")
+    # The headline must name a real matching configuration, not combine
+    # independent RAM and core-count targets that may not be sold together.
+    if choice:
+        h1_html = (f"Consider <em>{model_name}</em><br>{model_mem} GB memory, {model_cpu}-core CPU<br>and {model_disk_txt} storage.")
+    else:
+        h1_html = "No listed MacBook fits every estimate.<br><em>Review the workload</em> before choosing."
+    if target > max(SIZES) or storage_target > 16000:
+        lesson = ""  # Do not describe a capped chart as a qualifying recommendation.
+
     kick_html = (f"Work waited on the processors in {p_cpu:.0%} of {WM}, and on memory in {p_mem:.0%}." if cpu_first else
                  f"My work has needed up to {peak_ever:.1f} GB of memory. This Mac has {TOTAL:.0f}.")
 
     # ---------- Busy hours: the takeaway ----------
     over_cells = sorted(((x, k) for k, x in wcell.items() if x > TOTAL), reverse=True)
     names_ = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    hours_take = (f"The worst so far: {names_[over_cells[0][1][0]]} {over_cells[0][1][1]:02d}:00, {over_cells[0][0]:.1f} GB." if over_cells else "No working hour has gone over yet.")
+    hours_take = (f"The worst so far: {names_[over_cells[0][1][0]]} {over_cells[0][1][1]:02d}:00, {over_cells[0][0]:.1f} GB." if over_cells else "No measured hour has gone over yet.")
 
     # ---------- What uses memory: app groups over a time window, Claude's work opened up ----------
     a_last = max(apps_all) if apps_all else ""
@@ -861,6 +920,8 @@ h2.big em,.hero h1 em{{font-style:normal;background:linear-gradient(100deg,#ffb8
 .c{{border:2px solid var(--line);border-radius:28px;background:var(--card);padding:18px 20px;position:relative}}
 .c small{{display:block;color:var(--mute);font-size:13px}}
 .note{{color:var(--mute);font-size:13px}}
+#p-rec .hero .note a:link,#p-rec .hero .note a:visited{{color:var(--fg);text-decoration:underline;text-underline-offset:2px}}
+#p-rec .hero .note a:focus-visible{{outline:2px solid var(--fg);outline-offset:3px;border-radius:2px}}
 .tk{{fill:var(--mute);font:12px 'Geist Mono',monospace}}
 /* panel 1 */
 .hero{{text-align:center}}
@@ -1007,23 +1068,24 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <p class="kick en">{kick_html}</p>
 <h1 class=en id=rec-h1>{h1_html}</h1>
 <p class="note en">Estimate for work observed under current limits. Desired concurrent work is not yet sized; delayed and blocked tests are not measured. RAM plus swap can include older parked data. Pressure indicators do not measure blocked queue time.</p>
-{f'<p class="note en" style="margin:4px 0 0">The chip is a first guess from {cpu_days} working day{"s" if cpu_days != 1 else ""} of processor readings; memory and storage rest on {n_wd}.</p>' if chip_up else ""}
+<p class="note en">{model_html}</p>
+{f'<p class="note en" style="margin:4px 0 0">The chip is a first guess from {cpu_days} {day_kind} day{"s" if cpu_days != 1 else ""} of processor readings; memory and storage rest on {n_wd}.</p>' if chip_up else ""}
 {lesson}
 </section>
 {verdict}
 <div class=two>
 <div class="c en ladders{" cpufirst" if cpu_first and cpu_ok else ""}" style="--n:2"><div class=lmem><small>Memory: share of {WM} each size would have handled</small><div class="list ladder meml">{ladder}</div>
 <p class=note id=rec-note style="margin-top:10px">{len(work):,} minutes measured, {HOURS_TXT}.</p></div>
-{f"""<div class=lcpu id=rec-cpu><small>Processors: share of {WM} a chip with this many cores would have kept up</small><div class="list ladder cpul">{cl_rows}</div>
-<p class=note style="margin-top:10px">{len(loadw):,} {WM} on {cpu_days} working day{"s" if cpu_days != 1 else ""}, so this is a first guess. It counts cores only; newer chips&#x27; cores are faster than this Mac&#x27;s, so it overstates what you need.</p></div>""" if cpu_ok else ""}</div>
-<div class="c en" id=rec-jars style="--n:3"><svg class=jars viewBox="0 -60 1000 440" role=img aria-label="A {TOTAL:.0f} GB jar holding the busiest minute's {peak_ever:.1f} GB, next to a {rec} GB jar holding it with room to spare">{jars}</svg></div>
+{f"""<div class=lcpu id=rec-cpu><small>Processors: share of {WM} with load at or below each core count (not a forecast)</small><div class="list ladder cpul">{cl_rows}</div>
+<p class=note style="margin-top:10px">{len(loadw):,} {WM} on {cpu_days} {day_kind} day{"s" if cpu_days != 1 else ""}, so this is a first guess. This compares load with core counts only; different chips and core types can behave differently.</p></div>""" if cpu_ok else ""}</div>
+<div class="c en" id=rec-jars style="--n:3"><svg class=jars viewBox="0 -60 1000 440" role=img aria-label="A {TOTAL:.0f} GB jar holding the busiest minute's {peak_ever:.1f} GB, next to a {rec} GB comparison jar">{jars}</svg></div>
 </div>
 <div class=specs>
-{f'<div class="c en" id=rec-chip style="--n:5"><b>{chip_b}</b><span>processor, a first guess from {cpu_days} working day{"s" if cpu_days != 1 else ""}: more work was waiting than its {cores} cores could run in {wait_pct:.0%} of working minutes.</span></div>' if cpu_ok and cpu_first else ""}
-<div class="c en" id=rec-mem style="--n:4"><b>{rec} GB</b><span>estimate for observed work under current limits; desired concurrent work is not yet sized. Delayed or blocked work is not measured. The RAM-plus-swap estimate can include old parked data.</span></div>
-{f'<div class="c en" id=rec-chip style="--n:5"><b>{chip_b}</b><span>processor, a first guess from {cpu_days} working day{"s" if cpu_days != 1 else ""}: more work was waiting than its {cores} cores could run in {wait_pct:.0%} of working minutes.</span></div>' if cpu_ok and not cpu_first else ""}
-<div class="c en" id=rec-disk style="--n:5"><b>{disk_txt}</b><span>storage: {disk_used:.0f} GB of this Mac&#x27;s {disk_total:.0f} GB is in use, plus half again for growth.</span></div>
-<div class="c en" id=rec-days style="--n:6"><b>{n_wd} of {WD_GOAL}</b><span>working days measured so far{f"; the processors on {cpu_days}" if cpu_rows else ""}.</span></div>
+{f'<div class="c en" id=rec-chip style="--n:5"><b>{chip_b}</b><span>processor, a first guess from {cpu_days} {day_kind} day{"s" if cpu_days != 1 else ""}: more work was waiting than its {cores} cores could run in {wait_pct:.0%} of {WM}.</span></div>' if cpu_ok and cpu_first else ""}
+<div class="c en" id=rec-mem style="--n:4"><b>{rec} GB</b><span>{"largest listed size; target exceeds it. " if target > max(SIZES) else ""}Estimate for observed work under current limits; desired concurrent work is not yet sized. Delayed or blocked work is not measured. RAM plus swap can include old parked data.</span></div>
+{f'<div class="c en" id=rec-chip style="--n:5"><b>{chip_b}</b><span>processor, a first guess from {cpu_days} {day_kind} day{"s" if cpu_days != 1 else ""}: more work was waiting than its {cores} cores could run in {wait_pct:.0%} of {WM}.</span></div>' if cpu_ok and not cpu_first else ""}
+<div class="c en" id=rec-disk style="--n:5"><b>{disk_txt}</b><span>{"largest listed size; target exceeds it. " if storage_target > 16000 else ""}Storage: {disk_used:.0f} GB of this Mac&#x27;s {disk_total:.0f} GB is in use, plus half again for growth.</span></div>
+<div class="c en" id=rec-days style="--n:6"><b>{n_wd} of {WD_GOAL}</b><span>{day_kind} days with readings so far{f"; the processors on {cpu_days}" if cpu_rows else ""}.</span></div>
 </div>
 {render_storage(v.get("storage_home", v["HOME"]))}
 </div></section>
@@ -1088,14 +1150,15 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <div class="c en howc" style="--n:1"><ul>
 <li><b>Every minute</b> a background job reads macOS figures (<code>vm_stat</code>, <code>sysctl</code>, <code>ps</code>) into <code>~/memlog/</code>{', copied to Google Drive every 15 minutes' if cfg.get('drive_backup') else ''}: memory in use, memory on disk, memory and processor share per app, the scripts Claude runs with each one&#x27;s memory and processor share, and processor load. Nothing is sent anywhere else.</li>
 <li><b>Memory needed</b> is memory in use plus memory parked on disk (swap). Swap can keep old data from hours earlier, so this can overstate the real need; the minutes the Mac was actively moving memory to disk are shown separately as the drops on the Today chart.</li>
-<li><b>Working hours or all hours:</b> the switch at the bottom of every tab. Time the Mac is off or asleep is never counted. New swap, disk and network intervals are unknown after a restart, a gap or a counter reset; older records may have represented an unknown interval as zero. Storage history always covers all recorded hours.</li>
-<li><b>The recommendation</b> is the busiest minute ever measured plus a quarter, rounded up to a size Macs come in. The budget pick is the smallest size that would have covered 99% of working minutes. Storage is what is in use now plus half again. The processor pick is the smallest core count that would have kept up in 9 working minutes of 10; it counts cores only, and newer chips&#x27; cores are faster than an older Mac&#x27;s, so it overstates the need.</li>
+<li><b>Working hours or all hours:</b> all recorded hours are the default. Time the Mac is off or asleep is never counted. New swap, disk and network intervals are unknown after a restart, a gap or a counter reset; older records may have represented an unknown interval as zero. Storage history always covers all recorded hours.</li>
+<li><b>The recommendation</b> is the busiest minute ever measured plus a quarter, rounded up to a size Macs come in. The budget pick is the smallest size that would have covered 99% of the selected minutes. Storage is what is in use now plus half again. The processor comparison checks whether the observed load was at or below each core count in 9 selected minutes of 10. It is not a prediction of performance on a different chip.</li>
 <li><b>Processors</b> are measured as work waiting: the 1-minute load average divided by the number of cores. Above 1&times;, more work is waiting than the cores can run, so things slow down. &ldquo;% busy&rdquo; is not used for this because on Apple chips half the cores are slower ones: the fast half can be full while the total reads 50 to 60%.</li>
 <li><b>Every tab leads with what held the Mac up more</b> since the processors were first measured: Today opens on the processors chart or the memory chart, Busy days counts a day as held up after half an hour of it, Busy hours opens on &ldquo;What held it up&rdquo; (an hour counts when a tenth of it was), and What uses the Mac and What Claude runs open on processors or memory. Every one has a switch or a second chart for the other.</li>
 <li><b>What held it up</b> labels each minute, the same way on every tab: <i>processors</i> when work is waiting, <i>memory</i> when it pushes 100 MB a minute or more to disk, <i>memory and processors</i> when both happen in the same minute, and <i>heat</i> when macOS&#x27;s own heat level is fair or worse, meaning it is slowing the chip down to cool it (heat wins over the others then, because it is what made the processors slower). A hot chip and a loud fan alone do not count: they make the Mac loud, not slow.</li>
 <li><b>Hot &amp; slow</b> reads, each minute and without admin rights: the hottest processor temperature sensor and the fan speed (from a small Swift program, <code>heat</code>, built at install), macOS&#x27;s graphics load (<code>ioreg</code>), disk bytes read and written (<code>ioreg</code>), network bytes in and out (<code>netstat</code>) and each app&#x27;s share of the processors (<code>ps</code>). It also records macOS&#x27;s own heat level; when that goes above normal, macOS is slowing the Mac down to cool it, and the temperature tile says so. The dotted lines (90 &deg;C, fan at 60%, work waiting above 1&times; the cores, graphics 85% busy, 1 GB a minute of disk, 100 MB a minute pushed to disk, 500 MB a minute of network) are rules of thumb, not limits macOS enforces.</li>
 <li><b>Per-app memory</b> counts memory still in memory, not on disk. Memory two apps share can be counted twice. Meet is counted inside Chrome.</li>
 <li>{f'<b>Before {e(split_t)}</b> Chrome and the hidden test browsers Claude opens were counted together; those readings say so. ' if any('not split' in g for d_ in apps_all.values() for g in d_) else ''}Claude&#x27;s scripts are tracked from {e(tfirst or "now")}, processor load from {e(cpu_rows[0][0] if cpu_rows else "now")}.</li>
+<li><b>iOS simulator:</b> Simulator apps and runtime services are grouped separately from new readings onward. Their process memory can include shared pages, so the sum is not necessarily unique physical memory.</li>
 <li><b>Codex attribution:</b> Codex processes and tools started by Codex appear as app groups. The ChatGPT and Codex shared app group includes resources that cannot be assigned to Codex alone. Processes are not chat counts. Tools are attributed using observed Codex process ancestry; detached processes and shared browser services may be missed. Earlier Codex shared process readings may include unrelated ChatGPT resources.</li>
 <li><b>Session history</b> before {since} comes from Claude Code transcripts: a session counts as open while its messages are under 30 minutes apart. Codex and idle open sessions are not counted, so real numbers were probably higher.</li>
 <li><b>Right now:</b> {gb(U[-1])} GB in memory, {gb(S[-1])} GB on disk, {v["comp_gb"]:.1f} GB of memory holding {v["squeezed_gb"]:.1f} GB compressed, {v["wired_gb"]:.1f} GB locked by the system, {terms} sessions open.</li>
@@ -1264,7 +1327,7 @@ def add_today_cpu(page):
 # ---------- Recommendation: the buddy teaches how it got to the answer ----------
 # Every number comes from the readings. Steps that do not apply to this Mac are left out.
 def lesson_html(*, hours_txt, wm, TOTAL, work, wdays, fits, LADDER, peak_ever, peak_ever_when, target, rec, budget, fit16,
-                disk_used, disk_txt, disk_rec, n_wd, WD_GOAL, cpu):
+                disk_used, disk_txt, disk_rec, n_wd, WD_GOAL, model_summary, cpu):
     def row(sz):
         return f".lad[data-sz='{sz}']" if sz in LADDER else ""
     me = int(round(TOTAL))
@@ -1305,24 +1368,22 @@ def lesson_html(*, hours_txt, wm, TOTAL, work, wdays, fits, LADDER, peak_ever, p
         cd = cpu["days"]
         proc.append(("#rec-cpu", f"{'The processors' if first else 'Then the processors'}. More work was waiting than this Mac&#x27;s {cpu['cores']} cores could run in "
                                  f"<b>{cpu['wait']:.0%} of {wm}</b>. "
-                                 + (f"A chip with <b>{cpu['chip']} cores</b> would have kept up 9 minutes in 10. " if cpu["chip"] and cpu["up"] else
-                                    f"Even {cpu['chip_b'][:-7]} cores would not have kept up 9 minutes in 10. " if cpu["up"] else
-                                    "This chip kept up 9 minutes in 10, so it is enough. ")
-                                 + f"That is from {cd} working day{'s' if cd != 1 else ''}, so it is a first guess.",
+                                 + (f"The load was at or below <b>{cpu['chip']}</b> in 9 minutes in 10; this is not a speed prediction. " if cpu["chip"] and cpu["up"] else
+                                    f"The load was above {cpu['chip_b'][:-7]} in more than 1 minute in 10. " if cpu["up"] else
+                                    "Its load was at or below that core count in 9 minutes in 10; this does not predict another chip’s speed. ")
+                                 + f"That is from {cd} {"working" if wm == "working minutes" else "calendar"} day{'s' if cd != 1 else ''}, so it is a first guess.",
                      "cores", {"rows": cpu["rows"], "pick": cpu["chip"] if cpu["up"] else 0}))
     steps = why + (proc + mem if first else mem + proc)
     steps.append(("#rec-disk", f"Storage: <b>{disk_used:.0f} GB</b> is in use now. Half again for growth makes "
                                f"{disk_used * 1.5:.0f} GB, so <b>{disk_txt}</b>.",
                   "disk", {"used": round(disk_used), "need": round(disk_used * 1.5), "cap": disk_rec, "label": disk_txt}))
-    steps.append(("#rec-days", f"I have measured {n_wd} of {WD_GOAL} working days so far. A busier week could change this, "
-                               "so keep me running.", "days", {"n": n_wd, "goal": WD_GOAL}))
+    steps.append(("#rec-days", f"I have measured {n_wd} of {WD_GOAL} {"working" if wm == "working minutes" else "calendar"} days so far. A busier week could change this, "
+                               "so keep me running.", "days", {"n": n_wd, "goal": WD_GOAL, "label": "working" if wm == "working minutes" else "calendar"}))
     mem_p = f"<b>{rec} GB</b> of memory" if rec > TOTAL else ""
     chip_p = f"a chip with <b>{cpu['chip_b']}</b>" if cpu["ok"] and cpu["up"] else ""
     parts = [x for x in ((chip_p, mem_p) if first else (mem_p, chip_p)) if x]
     order = ["rec-chip", "rec-mem", "rec-disk"] if first else ["rec-mem", "rec-chip", "rec-disk"]
-    steps.append(("#rec-h1", ("So: " + ", ".join(parts) + f" and <b>{disk_txt}</b> of storage.") if mem_p else
-                             (f"So: this Mac&#x27;s memory is enough, but it needs a chip with <b>{cpu['chip_b']}</b>." if chip_p else
-                              f"So: this Mac&#x27;s <b>{TOTAL:.0f} GB</b> is enough for now. Look again after a busy week."),
+    steps.append(("#rec-h1", ("A compatible option: <b>" + html.escape(model_summary) + "</b>. Core-count comparisons are only a guide." if model_summary else "No listed configuration meets all estimates; review the workload before choosing."),
                   "sum", {"order": order}))
     n = len(steps)
     items = "".join(f'<li data-t="{t}" data-scene="{sc}" data-d=\'{json.dumps(d)}\'{" class=on" if k == 0 else ""}>'
@@ -1532,7 +1593,7 @@ LESSON_JS = r"""<script>
       add(c, `<div class=sc-gauge><i class=h style="width:${w(d.need)};animation-delay:.9s"></i><i class=u style="width:${w(d.used)}"></i></div>`
         + `<div class=sc-leg><i>in use ${d.used} GB</i><i class=e2 style="animation-delay:1.3s">+ half = ${d.need} GB</i><i class=end style="animation-delay:1.8s">fits in ${d.label}</i></div>`, "sc-call"); },
     days(d) { const c = document.getElementById("rec-days"); if (!c) return; dim("sc-on"); lead(c);
-      add(c, `<div>${d.n} of ${d.goal} working days measured</div><div class=sc-days>`
+      add(c, `<div>${d.n} of ${d.goal} ${d.label || "working"} days with readings</div><div class=sc-days>`
         + Array.from({ length: d.goal }, (_, k) => k < d.n ? `<i class=y style="animation-delay:${.3 + k * .12}s"></i>` : "<i></i>").join("") + "</div>", "sc-call"); },
     why() { const c = document.getElementById("rec-why"); if (!c) return; dim("sc-on"); lead(c);
       c.querySelectorAll(".vbar i").forEach((b, k) => { b.style.transition = "none"; b.style.width = "0%"; void b.offsetWidth;
