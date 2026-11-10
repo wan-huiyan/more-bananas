@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 
-from test_storage_history import MissingRateReportTests
+import test_storage_history as helpers
 
 APP = Path(__file__).resolve().parents[1] / 'skills/more-bananas/app'
 sys.path.insert(0, str(APP))
@@ -22,7 +22,7 @@ def report_for_workload(memory, swap, load):
         (root / 'mem.csv').write_text(''.join(f'{t},{memory},{swap},1,1,1\n' for t in times))
         (root / 'live.csv').write_text(''.join(f'{t},0,0,2,3,4\n' for t in times))
         (root / 'cpu.csv').write_text(''.join(f'{t},5,{load},10\n' for t in times))
-        values = MissingRateReportTests().page_data(directory)
+        values = helpers.MissingRateReportTests().page_data(directory)
         values.update(HOME=directory, stamp=times[-1], TOTAL_GB=24, out_mb=0, cfg={}, terms=1,
                       mood='calm', tone='#34d399', fav='', by_group={}, now_d={}, cores=10,
                       load1=load, swapped_total_gb=0, comp_gb=2, wired_gb=3, squeezed_gb=4,
@@ -40,6 +40,11 @@ class RecommendationFallbackTests(unittest.TestCase):
         self.assertIn('64 GB', page)
         self.assertIn('not yet measured', page)
         self.assertNotIn('No listed MacBook fits every estimate', page)
+
+    def test_normal_candidate_still_wins_when_cpu_screen_is_met(self):
+        page = report_for_workload(17, 15, 14)
+        self.assertIn('48 GB memory, 15-core CPU', page)
+        self.assertNotIn('below the 90% processor-screening target', page)
 
     def test_does_not_claim_a_model_meets_memory_beyond_catalog(self):
         page = report_for_workload(120, 20, 25)

@@ -690,11 +690,15 @@ def render(v):
         ("MacBook Pro PROLED M5 Max", 18, 40, (48, 64, 128), 16000),
     ]
     storage_target = disk_used * 1.5
-    choices = [(memory, ncpu, index, name, gpu, max_ssd)
-               for index, (name, ncpu, gpu, sizes, max_ssd) in enumerate(catalog)
-               for memory in sizes if memory >= target and max_ssd >= storage_target
-               and (not cpu_ok or cfits(ncpu) >= CHIP_COVER)]
-    choice = min(choices) if choices else None
+    eligible = [(memory, ncpu, index, name, gpu, max_ssd)
+                for index, (name, ncpu, gpu, sizes, max_ssd) in enumerate(catalog)
+                for memory in sizes if memory >= target and max_ssd >= storage_target]
+    choices = [item for item in eligible if not cpu_ok or cfits(item[1]) >= CHIP_COVER]
+    cpu_fallback = bool(not choices and eligible and cpu_ok)
+    # Load versus core count is a rough screen, not a performance benchmark.
+    # If no model passes it, retain the closest compatible choice and say so.
+    choice = (min(choices) if choices else
+              min(eligible, key=lambda item: (-cfits(item[1]), item[0], item[1], item[2])) if cpu_fallback else None)
     # A dated, like-for-like 14-inch Liquid XDR / 2TB price comparison.
     # It applies only when both exact configurations meet the same estimate;
     # these are reference prices, not a live or universal price ranking.
@@ -711,6 +715,17 @@ def render(v):
         model_disk_txt = f"{model_disk // 1000} TB" if model_disk >= 1000 else f"{model_disk} GB"
         model_html = (f"<b>{model_name}</b> &middot; {model_cpu}-core CPU, {model_gpu}-core GPU, "
                       f"{model_mem} GB memory. This is a compatible configuration, not a performance guarantee.")
+        if cpu_fallback:
+            model_html += (f" This closest compatible option matches {cfits(model_cpu):.1%} of recorded load readings, "
+                           "below the 90% processor-screening target. Core-count comparisons do not predict speed "
+                           "or prove a newer chip will handle that load.")
+        upgrades = [(memory, ncpu) for name, ncpu, gpu, sizes, max_ssd in catalog
+                    if name == model_name and ncpu >= model_cpu and max_ssd >= storage_target
+                    for memory in sizes if memory > model_mem]
+        if upgrades:
+            extra_mem, extra_cpu = min(upgrades)
+            model_html += (f" For additional concurrent work, {extra_mem} GB with a {extra_cpu}-core CPU is a planning option; "
+                           "the delayed workload is not yet measured, so this is not proven sufficient.")
     else:
         model_html = ("No listed configuration meets every estimate. Review the workload and "
                       "storage needs before choosing a Mac.")
@@ -719,7 +734,9 @@ def render(v):
                        "was <a href='https://restockowl.com/en/uk/education'>listed at £3,599 on 11 Oct</a>; the 14-inch M5 Max, 18-core CPU, "
                        "36 GB and 2 TB was <a href='https://ee.co.uk/products/macbook-pro-m5-max-14-inch'>listed at £4,099</a>. Both references are for Liquid XDR "
                        "displays, not PROLED. The Max has more CPU and GPU cores; verify current prices and your needs.")
-    else:
+    elif cpu_fallback:
+        model_html += " Selection prioritises the best observed processor-screening result, then the smallest fitting memory; it is not a price comparison."
+    elif choice:
         model_html += " Selection prioritises the smallest fitting memory and then core count; it is not a price comparison."
     model_html += (" CPU estimates compare core counts only; core types and speeds differ. "
                    "Check Apple for current configurations and prices. Catalogue checked 9 Nov 2026.")
