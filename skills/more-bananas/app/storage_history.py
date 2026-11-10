@@ -150,6 +150,19 @@ def render_storage(home):
               and isinstance(row.get('epoch'), (int, float)) and 0 <= time.time() - row['epoch'] <= 86400
               and isinstance(row.get('available_bytes'), int)]
     recent_note = f' Lowest observed available in the last 24 hours: {gb(min(recent))}.' if recent else ' No valid samples in the last 24 hours.'
+    hourly = {}
+    for row in rows:
+        epoch = row.get('epoch')
+        if not isinstance(epoch, (int, float)) or not 0 <= time.time() - epoch <= 86400:
+            continue
+        key = dt.datetime.fromtimestamp(epoch, dt.timezone.utc).strftime('%Y-%m-%d %H UTC')
+        hourly[key] = row
+    observations = ''.join(
+        f'<li>{html.escape(str(row.get("at", "unknown")))}: {gb(row.get("available_bytes")) if row.get("status") == "ok" else "unavailable"}</li>'
+        for row in reversed(list(hourly.values()))
+    )
+    history = ('<details><summary>Recent hourly observations</summary><p>Most recent sample within each observed hour; missing hours are unknown.</p><ol>'
+               + observations + '</ol></details>') if observations else ''
     events = records('cleanup-events.jsonl', 1000)[-5:]
     items = []
     for event in reversed(events):
@@ -158,11 +171,11 @@ def render_storage(home):
         source = html.escape(str(event.get('receipt_path', 'source not recorded')))
         digest = html.escape(str(event.get('receipt_sha256', 'unknown')))
         items.append(f'<li>{stamp} &middot; {scope}: {gb(event.get("deleted_logical_bytes"))} logical and {gb(event.get("deleted_allocated_entry_bytes"))} allocated-entry deleted; proof {gb(event.get("proof_logical_bytes"))} logical and {gb(event.get("proof_allocated_entry_bytes"))} allocated-entry; observed shared available-space change {gb(event.get("observed_shared_available_delta_bytes"))}. <details><summary>Receipt source and SHA-256</summary><code>{source}</code><br><code>{digest}</code></details></li>')
-    details = '<ul>' + ''.join(items) + '</ul>' if items else '<p>No completed cleanup receipts have been imported.</p>'
+    details = '<ol>' + ''.join(items) + '</ol>' if items else '<p>No completed cleanup receipts have been imported.</p>'
     return (f'<div class="c en"><h3>Storage history &amp; cleanup evidence</h3><p>{usage}{recent_note}</p>'
             '<p>Storage history always covers all recorded hours. Available and free are different filesystem counters. Purgeable space is not measured. '
             'Changes in shared APFS availability do not identify a cause or prove exclusive recovery; '
-            'disk read/write traffic is not retained file growth. Gaps are unknown.</p>' + details + '</div>')
+            'disk read/write traffic is not retained file growth. Gaps are unknown.</p>' + history + details + '</div>')
 
 
 def record_volume(home, path, boot, epoch=None):
