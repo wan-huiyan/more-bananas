@@ -698,7 +698,7 @@ def render(v):
     # Load versus core count is a rough screen, not a performance benchmark.
     # If no model passes it, retain the closest compatible choice and say so.
     choice = (min(choices) if choices else
-              min(eligible, key=lambda item: (-cfits(item[1]), item[0], item[1], item[2])) if cpu_fallback else None)
+              min(eligible, key=lambda item: (-cfits(item[1]), -item[1], item[0], item[2])) if cpu_fallback else None)
     # A dated, like-for-like 14-inch Liquid XDR / 2TB price comparison.
     # It applies only when both exact configurations meet the same estimate;
     # these are reference prices, not a live or universal price ranking.
@@ -735,7 +735,7 @@ def render(v):
                        "36 GB and 2 TB was <a href='https://ee.co.uk/products/macbook-pro-m5-max-14-inch'>listed at £4,099</a>. Both references are for Liquid XDR "
                        "displays, not PROLED. The Max has more CPU and GPU cores; verify current prices and your needs.")
     elif cpu_fallback:
-        model_html += " Selection prioritises the best observed processor-screening result, then the smallest fitting memory; it is not a price comparison."
+        model_html += " Selection prioritises the best observed processor-screening result, more cores on a tie, then the smallest fitting memory; it is not a price comparison."
     elif choice:
         model_html += " Selection prioritises the smallest fitting memory and then core count; it is not a price comparison."
     model_html += (" CPU estimates compare core counts only; core types and speeds differ. "
