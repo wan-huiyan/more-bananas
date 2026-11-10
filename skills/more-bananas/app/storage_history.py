@@ -1,7 +1,12 @@
 """Helpers for volume history, rate validity and verified cleanup records."""
 import datetime as dt
+import fcntl
+import hashlib
+import json
 import math
+import os
 import re
+import stat
 
 
 def derive_rates(previous, current):
@@ -79,4 +84,30 @@ def volume_reading(stat):
 
 
 def import_cleanup_receipt(source, log):
-    return False
+    fd = os.open(os.fspath(source), os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 2 * 1024 * 1024:
+            raise ValueError('receipt must be a regular file no larger than 2 MiB')
+        raw = stream.read(2 * 1024 * 1024 + 1)
+    if len(raw) > 2 * 1024 * 1024:
+        raise ValueError('receipt exceeds size limit')
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise ValueError('receipt is not valid JSON') from exc
+    event = normalize_cleanup_receipt(data, hashlib.sha256(raw).hexdigest())
+    if event is None:
+        raise ValueError('receipt does not prove a completed cleanup')
+    event['receipt_path'] = os.path.abspath(os.fspath(source))
+    with open(log, 'a+', encoding='utf-8') as output:
+        fcntl.flock(output, fcntl.LOCK_EX)
+        output.seek(0)
+        for line in output:
+            if json.loads(line).get('receipt_sha256') == event['receipt_sha256']:
+                return False
+        output.seek(0, os.SEEK_END)
+        output.write(json.dumps(event, ensure_ascii=False, separators=(',', ':')) + '\n')
+        output.flush()
+        os.fsync(output.fileno())
+    return True
