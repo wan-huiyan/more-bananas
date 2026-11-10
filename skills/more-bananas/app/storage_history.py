@@ -76,3 +76,7 @@ def volume_reading(stat):
     if not 0 <= available <= free <= total or unit <= 0:
         raise ValueError('invalid filesystem counters')
     return {'total_bytes': total, 'free_bytes': free, 'available_bytes': available}
+
+
+def import_cleanup_receipt(source, log):
+    return False

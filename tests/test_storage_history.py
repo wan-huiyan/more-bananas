@@ -2,6 +2,8 @@
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
+import json
+import tempfile
 import unittest
 
 path = Path(__file__).resolve().parents[1] / 'skills/more-bananas/app/storage_history.py'
@@ -63,3 +65,26 @@ class EvidenceTests(unittest.TestCase):
     def test_unentered_or_unconfirmed_receipts_never_become_cleanup_events(self):
         self.assertIsNone(storage.normalize_cleanup_receipt({'runtimeEntered': False, 'plannedLogicalBytes': 100}, 'b' * 64))
         self.assertIsNone(storage.normalize_cleanup_receipt({'status': 'RESOURCE_END_EXAMPLE_COMPLETE', 'unconfirmedDeletions': 1}, 'c' * 64))
+
+    def test_import_is_idempotent_and_keeps_original_receipt(self):
+        receipt = {'status': 'RESOURCE_END_EXAMPLE_COMPLETE', 'UTC': '2026-11-06T00:14:55+00:00', 'scope': 'example', 'originalExit': 0, 'unconfirmedDeletions': 0, 'actualDeletedLogicalBytes': 100, 'actualDeletedAllocatedEntryBytes': 120, 'availableBeforeBytes': 1000, 'actorAvailableAfterBytes': 1080}
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'receipt.json'
+            log = Path(directory) / 'cleanup.jsonl'
+            original = json.dumps(receipt)
+            source.write_text(original)
+            self.assertTrue(storage.import_cleanup_receipt(source, log))
+            self.assertFalse(storage.import_cleanup_receipt(source, log))
+            self.assertEqual(source.read_text(), original)
+            events = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]['deleted_logical_bytes'], 100)
+
+    def test_import_refuses_unentered_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'receipt.json'
+            log = Path(directory) / 'cleanup.jsonl'
+            source.write_text('{"runtimeEntered": false, "plannedLogicalBytes": 999}')
+            with self.assertRaises(ValueError):
+                storage.import_cleanup_receipt(source, log)
+            self.assertFalse(log.exists())
