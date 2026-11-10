@@ -154,6 +154,7 @@ class MissingRateReportTests(unittest.TestCase):
                 stamp = dt.datetime.now().strftime('%Y-%m-%d %H:%M')
                 (root / 'mem.csv').write_text((stamp + ',12,1,1,1,1\n') * 60)
                 (root / 'live.csv').write_text(stamp + ',,,2,3,4\n')
+                (root / 'cpu.csv').write_text(stamp + ',5,1,8\n')
                 v = self.page_data(directory)
                 v.update(HOME=directory, stamp=stamp, TOTAL_GB=24, out_mb=None, cfg={}, terms=1, mood='unknown',
                          tone='#8793a9', fav='', by_group={}, now_d={}, cores=8, load1=1,
