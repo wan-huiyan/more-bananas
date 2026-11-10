@@ -724,7 +724,7 @@ def render(v):
                     for memory in sizes if memory > model_mem]
         if upgrades:
             extra_mem, extra_cpu = min(upgrades)
-            model_html += (f" For additional concurrent work, {extra_mem} GB with a {extra_cpu}-core CPU is a planning option; "
+            model_html += (f" For additional concurrent work, {extra_mem} GB with {extra_cpu} CPU cores is a planning option; "
                            "the delayed workload is not yet measured, so this is not proven sufficient.")
     else:
         model_html = ("No listed configuration meets every estimate. Review the workload and "
