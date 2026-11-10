@@ -111,3 +111,7 @@ def import_cleanup_receipt(source, log):
         output.flush()
         os.fsync(output.fileno())
     return True
+
+
+def render_storage(home):
+    return ''

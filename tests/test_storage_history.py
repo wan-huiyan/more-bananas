@@ -93,6 +93,21 @@ class EvidenceTests(unittest.TestCase):
                 storage.import_cleanup_receipt(source, log)
             self.assertFalse(log.exists())
 
+    def test_dashboard_separates_cleanup_from_shared_space_movement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'storage.jsonl').write_text(json.dumps({'at': '2026-11-10T14:00:00+00:00', 'status': 'ok', 'available_bytes': 2000000000, 'free_bytes': 3000000000, 'total_bytes': 10000000000}) + '\n')
+            event = {'at': '2026-11-10T13:00:00+00:00', 'scope': 'sample', 'deleted_logical_bytes': 1000000000, 'deleted_allocated_entry_bytes': 1200000000, 'proof_logical_bytes': 100000000, 'proof_allocated_entry_bytes': 200000000, 'observed_shared_available_delta_bytes': 800000000}
+            (root / 'cleanup-events.jsonl').write_text(json.dumps(event) + '\n')
+            page = storage.render_storage(root)
+            self.assertIn('2.00 GB', page)
+            self.assertIn('1.00 GB', page)
+            self.assertIn('1.20 GB', page)
+            self.assertIn('0.80 GB', page)
+            self.assertIn('shared', page.lower())
+            self.assertIn('0.20 GB', page)
+            self.assertNotIn('recovered 1.20', page.lower())
+
 
 class MissingRateReportTests(unittest.TestCase):
     def page_data(self, directory):
