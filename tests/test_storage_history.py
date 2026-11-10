@@ -74,6 +74,10 @@ class EvidenceTests(unittest.TestCase):
         self.assertIsNone(storage.normalize_cleanup_receipt({'runtimeEntered': False, 'plannedLogicalBytes': 100}, 'b' * 64))
         self.assertIsNone(storage.normalize_cleanup_receipt({'status': 'RESOURCE_END_EXAMPLE_COMPLETE', 'unconfirmedDeletions': 1}, 'c' * 64))
 
+    def test_receipt_does_not_treat_false_as_success_exit_code(self):
+        receipt = {'status': 'RESOURCE_END_EXAMPLE_COMPLETE', 'UTC': '2026-11-06T00:14:55+00:00', 'originalExit': False, 'originalEOF': True, 'independentVerifierExit': 0, 'independentVerifierEOF': True, 'unconfirmedDeletions': 0, 'actualDeletedLogicalBytes': 100, 'actualDeletedAllocatedEntryBytes': 120, 'availableBeforeBytes': 1000, 'actorAvailableAfterBytes': 1080}
+        self.assertIsNone(storage.normalize_cleanup_receipt(receipt, 'd' * 64))
+
     def test_import_is_idempotent_and_keeps_original_receipt(self):
         receipt = {'status': 'RESOURCE_END_EXAMPLE_COMPLETE', 'UTC': '2026-11-06T00:14:55+00:00', 'scope': 'example', 'originalExit': 0, 'originalEOF': True, 'independentVerifierExit': 0, 'independentVerifierEOF': True, 'unconfirmedDeletions': 0, 'actualDeletedLogicalBytes': 100, 'actualDeletedAllocatedEntryBytes': 120, 'availableBeforeBytes': 1000, 'actorAvailableAfterBytes': 1080}
         with tempfile.TemporaryDirectory() as directory:
