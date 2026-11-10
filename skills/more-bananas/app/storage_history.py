@@ -2,7 +2,7 @@
 
 
 def derive_rates(previous, current):
-    return {'reason': 'not_implemented', 'rates': {}}
+    return {'reason': 'not_implemented', 'rates': {k: None for k in current['counters']}}
 
 
 def normalize_cleanup_receipt(receipt, digest):
