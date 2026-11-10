@@ -155,6 +155,10 @@ Re-running `install.sh` upgrades the code and keeps your readings and settings. 
 
 `launchd` runs `memlog.py` once a minute. It reads macOS's memory figures, groups processes into apps (and Claude Code's child processes into the session that started them), appends a row to a few CSV files in `~/memlog/`, and rebuilds one self-contained HTML page. No server, no network, no dependencies beyond the Python that ships with the Xcode command line tools.
 
+The storage history records the Data volume's total, filesystem-free and user-available bytes in `storage.jsonl`. These counters are not purgeable-space estimates, and shared APFS free-space changes do not identify which process or cleanup caused them. Records start when this version is installed; earlier disk history is unknown. `intervals.jsonl` records boot identity, interval boundaries and per-counter validity. A first sample, boot change, counter reset, clock reversal or gap over five minutes is unknown, not a zero rate. Older CSV rows can contain zeros from the previous collector's gap handling.
+
+Optional completed cleanup receipts can be listed as exact file paths in the `cleanup_receipts` array in `~/memlog/config.json`. Only supported, independently completed `RESOURCE_END_*_COMPLETE` receipts with confirmed exits, verified completion and actual byte counts are imported; unentered plans are rejected. The append-only `cleanup-events.jsonl` deduplicates receipt hashes and keeps deleted logical bytes, deleted allocated-entry bytes, proof overhead and observed shared-volume movement separate. This is evidence from the receipt, not a measurement of exclusive APFS blocks recovered. Unlisted or unsupported receipts remain unknown; no directories are scanned or deleted.
+
 ```
 skills/more-bananas/
 ├── SKILL.md            what Claude reads when you ask it to install or explain the monitor

@@ -14,6 +14,8 @@ from pathlib import Path
 
 
 def derive_rates(previous, current):
+    if not isinstance(previous, dict):
+        previous = None
     counters = current.get('counters', {})
     rates = {key: None for key in counters}
     reasons = {key: None for key in counters}
@@ -50,8 +52,9 @@ def normalize_cleanup_receipt(receipt, digest):
         return None
     status = receipt.get('status')
     if (not isinstance(status, str) or not status.startswith('RESOURCE_END_') or not status.endswith('_COMPLETE')
-            or receipt.get('originalExit') != 0 or receipt.get('unconfirmedDeletions') != 0
-            or receipt.get('independentVerifierExit', 0) != 0):
+            or receipt.get('runtimeEntered') is False or receipt.get('originalExit') != 0
+            or receipt.get('originalEOF') is not True or receipt.get('unconfirmedDeletions') != 0
+            or receipt.get('independentVerifierExit') != 0 or receipt.get('independentVerifierEOF') is not True):
         return None
     fields = ('actualDeletedLogicalBytes', 'actualDeletedAllocatedEntryBytes',
               'availableBeforeBytes', 'actorAvailableAfterBytes')
@@ -152,10 +155,12 @@ def render_storage(home):
     for event in reversed(events):
         scope = html.escape(str(event.get('scope', 'cleanup')))
         stamp = html.escape(str(event.get('at', 'unknown')))
-        items.append(f'<li>{stamp} &middot; {scope}: {gb(event.get("deleted_logical_bytes"))} logical and {gb(event.get("deleted_allocated_entry_bytes"))} allocated-entry deleted; proof {gb(event.get("proof_logical_bytes"))} logical and {gb(event.get("proof_allocated_entry_bytes"))} allocated-entry; observed shared available-space change {gb(event.get("observed_shared_available_delta_bytes"))}.</li>')
+        source = html.escape(str(event.get('receipt_path', 'source not recorded')))
+        digest = html.escape(str(event.get('receipt_sha256', 'unknown')))
+        items.append(f'<li>{stamp} &middot; {scope}: {gb(event.get("deleted_logical_bytes"))} logical and {gb(event.get("deleted_allocated_entry_bytes"))} allocated-entry deleted; proof {gb(event.get("proof_logical_bytes"))} logical and {gb(event.get("proof_allocated_entry_bytes"))} allocated-entry; observed shared available-space change {gb(event.get("observed_shared_available_delta_bytes"))}. <details><summary>Receipt source and SHA-256</summary><code>{source}</code><br><code>{digest}</code></details></li>')
     details = '<ul>' + ''.join(items) + '</ul>' if items else '<p>No completed cleanup receipts have been imported.</p>'
     return (f'<div class="c en"><h3>Storage history &amp; cleanup evidence</h3><p>{usage}{recent_note}</p>'
-            '<p>Available and free are different filesystem counters. Purgeable space is not measured. '
+            '<p>Storage history always covers all recorded hours. Available and free are different filesystem counters. Purgeable space is not measured. '
             'Changes in shared APFS availability do not identify a cause or prove exclusive recovery; '
             'disk read/write traffic is not retained file growth. Gaps are unknown.</p>' + details + '</div>')
 
@@ -165,8 +170,9 @@ def record_volume(home, path, boot, epoch=None):
     sample = {'at': dt.datetime.fromtimestamp(epoch, dt.timezone.utc).isoformat(),
               'epoch': epoch, 'boot': boot, 'volume': os.fspath(path)}
     try:
-        sample.update(volume_reading(os.statvfs(path)))
-        sample.update(device=os.stat(path).st_dev, status='ok')
+        reading = volume_reading(os.statvfs(path))
+        device = os.stat(path).st_dev
+        sample.update(reading, device=device, status='ok')
     except (OSError, ValueError):
         sample['status'] = 'unavailable'
     with open(Path(home) / 'storage.jsonl', 'a', encoding='utf-8') as output:

@@ -74,7 +74,7 @@ def minute_causes(home):
     state = {r[0]: r[1] for r in _rows(os.path.join(home, "heat.csv"), 6) if r[1]}
     out = {}
     for t in set(swap) | set(wait):
-        if t in swap and swap[t] is None:
+        if swap.get(t) is None:
             continue  # Missing swap data is not a zero-pressure minute.
         m, p = (swap.get(t) or 0) >= SWAP_HARD, (wait.get(t) or 0) > 1
         out[t] = "heat" if state.get(t) in SLOWING else "both" if m and p else "mem" if m else "cpu" if p else ""

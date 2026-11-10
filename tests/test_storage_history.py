@@ -61,7 +61,7 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(storage.volume_reading(stat), {'total_bytes': 409600, 'free_bytes': 122880, 'available_bytes': 81920})
 
     def test_completed_receipt_keeps_cleanup_and_shared_delta_separate(self):
-        receipt = {'status': 'RESOURCE_END_EXAMPLE_COMPLETE', 'UTC': '2026-11-06T00:14:55+00:00', 'scope': 'example', 'admission': 'example-admission', 'originalExit': 0, 'unconfirmedDeletions': 0, 'actualDeletedLogicalBytes': 100, 'actualDeletedAllocatedEntryBytes': 120, 'newCacheProofLogicalBytes': 4, 'newCacheProofAllocatedEntryBytes': 8, 'availableBeforeBytes': 1000, 'actorAvailableAfterBytes': 1080}
+        receipt = {'status': 'RESOURCE_END_EXAMPLE_COMPLETE', 'UTC': '2026-11-06T00:14:55+00:00', 'scope': 'example', 'admission': 'example-admission', 'originalExit': 0, 'originalEOF': True, 'independentVerifierExit': 0, 'independentVerifierEOF': True, 'unconfirmedDeletions': 0, 'actualDeletedLogicalBytes': 100, 'actualDeletedAllocatedEntryBytes': 120, 'newCacheProofLogicalBytes': 4, 'newCacheProofAllocatedEntryBytes': 8, 'availableBeforeBytes': 1000, 'actorAvailableAfterBytes': 1080}
         event = storage.normalize_cleanup_receipt(receipt, 'a' * 64)
         self.assertIsNotNone(event)
         self.assertEqual(event['deleted_logical_bytes'], 100)
@@ -74,7 +74,7 @@ class EvidenceTests(unittest.TestCase):
         self.assertIsNone(storage.normalize_cleanup_receipt({'status': 'RESOURCE_END_EXAMPLE_COMPLETE', 'unconfirmedDeletions': 1}, 'c' * 64))
 
     def test_import_is_idempotent_and_keeps_original_receipt(self):
-        receipt = {'status': 'RESOURCE_END_EXAMPLE_COMPLETE', 'UTC': '2026-11-06T00:14:55+00:00', 'scope': 'example', 'originalExit': 0, 'unconfirmedDeletions': 0, 'actualDeletedLogicalBytes': 100, 'actualDeletedAllocatedEntryBytes': 120, 'availableBeforeBytes': 1000, 'actorAvailableAfterBytes': 1080}
+        receipt = {'status': 'RESOURCE_END_EXAMPLE_COMPLETE', 'UTC': '2026-11-06T00:14:55+00:00', 'scope': 'example', 'originalExit': 0, 'originalEOF': True, 'independentVerifierExit': 0, 'independentVerifierEOF': True, 'unconfirmedDeletions': 0, 'actualDeletedLogicalBytes': 100, 'actualDeletedAllocatedEntryBytes': 120, 'availableBeforeBytes': 1000, 'actorAvailableAfterBytes': 1080}
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'receipt.json'
             log = Path(directory) / 'cleanup.jsonl'

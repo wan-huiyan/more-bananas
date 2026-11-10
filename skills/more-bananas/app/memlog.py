@@ -413,7 +413,7 @@ crowd += [{"name": short(folders.get(p_, "unknown folder")), "gb": round(gb, 2),
 OUT_ALL = os.path.join(HOME, "memory-report-all.html")
 wdata = page_data(WDIR)
 ctx = dict(locals())               # the module's namespace; render() reads it and sets yard_measure
-ctx.update(hours="all", hours_txt="every hour the Mac was on", other_ok=wdata is not None,
+ctx.update(storage_home=HOME, hours="all", hours_txt="every hour the Mac was on", other_ok=wdata is not None,
            here=OUT_ALL, other=OUT, hrs=list(range(24)), wds=list(range(7)))
 pages = [(OUT_ALL, ctx)]
 if wdata:                          # the default page: working hours only

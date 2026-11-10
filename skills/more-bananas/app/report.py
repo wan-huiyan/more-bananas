@@ -1025,7 +1025,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <div class="c en" id=rec-disk style="--n:5"><b>{disk_txt}</b><span>storage: {disk_used:.0f} GB of this Mac&#x27;s {disk_total:.0f} GB is in use, plus half again for growth.</span></div>
 <div class="c en" id=rec-days style="--n:6"><b>{n_wd} of {WD_GOAL}</b><span>working days measured so far{f"; the processors on {cpu_days}" if cpu_rows else ""}.</span></div>
 </div>
-{render_storage(v["HOME"])}
+{render_storage(v.get("storage_home", v["HOME"]))}
 </div></section>
 
 <section class="panel rpanel" id=p-today role=tabpanel><div class=inner>
@@ -1088,7 +1088,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
 <div class="c en howc" style="--n:1"><ul>
 <li><b>Every minute</b> a background job reads macOS figures (<code>vm_stat</code>, <code>sysctl</code>, <code>ps</code>) into <code>~/memlog/</code>{', copied to Google Drive every 15 minutes' if cfg.get('drive_backup') else ''}: memory in use, memory on disk, memory and processor share per app, the scripts Claude runs with each one&#x27;s memory and processor share, and processor load. Nothing is sent anywhere else.</li>
 <li><b>Memory needed</b> is memory in use plus memory parked on disk (swap). Swap can keep old data from hours earlier, so this can overstate the real need; the minutes the Mac was actively moving memory to disk are shown separately as the drops on the Today chart.</li>
-<li><b>Working hours or all hours:</b> the switch at the bottom of every tab. Working hours ({e(v.get("work_txt", "Monday to Friday, 9am to 7pm"))}, set in config.json) is the default, and every tab, the recommendation included, then counts only minutes inside them. Time the Mac is off or asleep is never counted: nothing is measured then, and the first reading after a gap records no swap, disk or network rate rather than an average over the night.</li>
+<li><b>Working hours or all hours:</b> the switch at the bottom of every tab. Time the Mac is off or asleep is never counted. New swap, disk and network intervals are unknown after a restart, a gap or a counter reset; older records may have represented an unknown interval as zero. Storage history always covers all recorded hours.</li>
 <li><b>The recommendation</b> is the busiest minute ever measured plus a quarter, rounded up to a size Macs come in. The budget pick is the smallest size that would have covered 99% of working minutes. Storage is what is in use now plus half again. The processor pick is the smallest core count that would have kept up in 9 working minutes of 10; it counts cores only, and newer chips&#x27; cores are faster than an older Mac&#x27;s, so it overstates the need.</li>
 <li><b>Processors</b> are measured as work waiting: the 1-minute load average divided by the number of cores. Above 1&times;, more work is waiting than the cores can run, so things slow down. &ldquo;% busy&rdquo; is not used for this because on Apple chips half the cores are slower ones: the fast half can be full while the total reads 50 to 60%.</li>
 <li><b>Every tab leads with what held the Mac up more</b> since the processors were first measured: Today opens on the processors chart or the memory chart, Busy days counts a day as held up after half an hour of it, Busy hours opens on &ldquo;What held it up&rdquo; (an hour counts when a tenth of it was), and What uses the Mac and What Claude runs open on processors or memory. Every one has a switch or a second chart for the other.</li>
