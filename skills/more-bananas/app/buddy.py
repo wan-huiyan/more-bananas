@@ -182,6 +182,24 @@ YARD_CSS = """
  .mini.walk .leg-b{animation:step .32s ease-in-out infinite alternate-reverse}
  .mini.walk .body{animation:waddle .32s ease-in-out infinite alternate}
 }
+.podiums{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:space-evenly;align-items:flex-end;gap:10px;padding:0 18px;pointer-events:none;z-index:1}
+.pod{margin:0;flex:1 1 0;min-width:0;max-width:310px;pointer-events:auto}
+.pod figcaption{font-size:12px;color:var(--mute);text-align:center;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pod figcaption b{font:600 15px Fredoka,sans-serif;color:var(--fg)}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end}
+.step{display:flex;flex-direction:column;align-items:center;min-width:0}
+.podiums .mini{position:relative;left:auto;top:auto;cursor:default;will-change:auto;width:48%;margin-bottom:-3px}
+.step.s1 .mini{width:60%} .step.s3 .mini{width:44%}
+.medal{position:absolute;right:-6px;top:38%;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font:700 11px/1 Fredoka,sans-serif;font-style:normal;
+ color:#1d2a44;background:var(--mc);box-shadow:0 0 0 2px var(--card),0 2px 4px rgba(0,0,0,.18)}
+.blk{align-self:stretch;display:flex;flex-direction:column;justify-content:center;gap:1px;padding:4px 5px;text-align:center;color:#1d2a44;
+ background:var(--mc);border-radius:8px 8px 0 0;box-shadow:inset 0 -3px 0 rgba(0,0,0,.08)}
+.step.s1{--mc:linear-gradient(#ffe46a,#f2c418)} .step.s1 .blk{height:70px} .step.s1 .medal{background:#ffd93b}
+.step.s2{--mc:#d6dce5} .step.s2 .blk{height:56px;border-top-right-radius:0} .step.s2 .medal{background:#d6dce5}
+.step.s3{--mc:#e8b07a} .step.s3 .blk{height:44px;border-top-left-radius:0} .step.s3 .medal{background:#e8b07a}
+.blk b{font:600 12.5px/1.15 Fredoka,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.blk em{font:500 11px/1.1 ui-monospace,monospace;font-style:normal;opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:560px){#yard{height:640px!important}.podiums{flex-direction:column;align-items:center;gap:6px}.pod{flex:none;width:100%}.blk b{font-size:11px}.blk em{font-size:9.5px}.pod figcaption{font-size:10.5px}.pod figcaption b{font-size:13px}}
 @keyframes step{from{transform:translateY(-3px)}to{transform:translateY(1px)}}
 @keyframes waddle{from{transform:rotate(-3deg)}to{transform:rotate(3deg)}}
 """
@@ -190,7 +208,7 @@ YARD_JS = """<script>
 (() => {
   const crowd = __CROWD__, mood = "__MOOD__", WORDS = __WORDS__;
   let byCpu = "__MEASURE__" === "cpu";
-  const yard = document.getElementById("yard"); if (!yard || !crowd.length) return;
+  const yard = document.getElementById("yard"); if (!yard) return;
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const size = c => byCpu ? (c.cpu || 0) : c.gb;              // what a buddy's size stands for
   let max = Math.max(...crowd.map(size), byCpu ? 1 : .1);
@@ -210,8 +228,9 @@ YARD_JS = """<script>
     folder: '<g class="p-folder"><path d="M14 64h11l3 3h18v17H14z" fill="#fbbc05" stroke="#c99700"/></g>',
     banana: '<g class="p-banana"><path d="M14 74c6 10 24 10 30-6 1-3-1-5-2-4-1 8-12 14-28 10z" fill="#ffd93b" stroke="#c99700"/></g>'
   };
-  const svg = (c, uid) => {
-    const suit = c.kind === "claude" ? "#d97757" : "#2f6fb5", suitD = c.kind === "claude" ? "#b85e40" : "#1f4d86", two = byCpu ? (c.cpu || 0) >= 10 : c.gb >= 1;
+  const svg = (c, uid, m) => {
+    const suit = c.kind === "claude" ? "#d97757" : "#2f6fb5", suitD = c.kind === "claude" ? "#b85e40" : "#1f4d86",
+      two = (m || (byCpu ? "cpu" : "mem")) === "cpu" ? (c.cpu || 0) >= 10 : (c.gb || 0) >= 1;
     const lens = (x, r) => `<circle cx="${x}" cy="30" r="${r}" fill="#fff" stroke="#9aa3ad" stroke-width="3"/><circle cx="${x}" cy="30" r="${r}" fill="none" stroke="#6b7480" stroke-width="1" />` +
       `<g class="pupil"><circle cx="${x}" cy="31" r="${r * .45}" fill="#7a4b23"/><circle cx="${x}" cy="31" r="${r * .22}" fill="#1b1b1b"/></g><circle cx="${x - r * .35}" cy="${30 - r * .4}" r="${r * .22}" fill="#fff" opacity=".9"/>`;
     const eyes = two ? lens(21, 8) + lens(39, 8) : lens(30, 10);
@@ -232,18 +251,49 @@ YARD_JS = """<script>
   };
   // Deterministic placement from the name, so buddies do not jump around on the every-minute refresh (huashu: seed every random).
   const seed = str => { let h = 2166136261; for (const ch of str) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0) / 4294967296); };
+  // The podium: the top three apps by memory and by processors, on the grass at the bottom of the yard.
+  // It follows the time window of the list beside it (Now, 24 hours, 7 days, 30 days).
+  let pod = null; try { pod = JSON.parse(document.getElementById("podium-data").textContent); } catch (_) {}
+  const stage = document.createElement("div"); stage.className = "podiums";
+  const WIN = { now: "right now", d1: "24 hours, average", d7: "7 days, average", d30: "30 days, average" };
+  const drawPodium = win => {
+    const w = pod && pod.wins[win]; if (!w) { stage.innerHTML = ""; return; }
+    const order = pod.first === "cpu" ? ["cpu", "mem"] : ["mem", "cpu"];
+    stage.innerHTML = order.filter(m => w[m] && w[m].length).map(m => {
+      const val = x => m === "cpu" ? Math.round(x) + "% of cores" : x.toFixed(1) + " GB";
+      const esc = t => t.replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+      const top = w[m].map(([name, x], i) => ({ name: esc(name), x, rank: i + 1 }));
+      const steps = [top[1], top[0], top[2]].filter(Boolean).map(t => {
+        const c = { name: t.name, kind: t.name === "Claude Code sessions" ? "claude" : "app", gb: m === "mem" ? t.x : 0, cpu: m === "cpu" ? t.x : 0 };
+        return `<div class="step s${t.rank}" title="${t.rank}. ${t.name}: ${val(t.x)}"><div class="mini busy">${svg(c, "p" + m + t.rank, m)}<i class=medal>${t.rank}</i></div>`
+          + `<div class=blk><b>${t.name}</b><em>${val(t.x)}</em></div></div>`;
+      }).join("");
+      return `<figure class=pod><figcaption><b>Most ${m === "cpu" ? "processors" : "memory"}</b> ${WIN[win]}</figcaption><div class=steps>${steps}</div></figure>`;
+    }).join("");
+  };
+  const winNow = () => { try { return localStorage.getItem("mm-win-p-uses") || "now"; } catch (_) { return "now"; } };
+  if (pod) {
+    yard.appendChild(stage); drawPodium(winNow());
+    const panel = yard.closest(".panel");
+    if (panel) panel.addEventListener("click", ev => { const b = ev.target.closest(".jobs .jt"); if (b && b.dataset.v) drawPodium(b.dataset.v); });
+  }
+  if (!crowd.length) return;
   const W = () => yard.clientWidth, H = () => yard.clientHeight;
+  const floor = () => H() - (stage.isConnected ? stage.offsetHeight : 0);   // wanderers stay above the podium
+  // Buddies shrink a little when the podium leaves them less room (a short laptop screen), so they do not pile up.
+  const bw = c => (34 + 54 * Math.sqrt(size(c) / max)) * Math.min(1, Math.max(.6, floor() / 380));
   const inner = (c, i) => svg(c, i) + `<span class="tag">${c.name.length > 16 ? c.name.slice(0, 15) + "…" : c.name}</span>`
     + `<span class="say">${c.name}: ${byCpu ? `${Math.round(c.cpu || 0)}% of the processors, ${gbTxt(c.gb)}` : gbTxt(c.gb)}</span>`;
   const mobs = crowd.map((c, i) => {
     const el = document.createElement("div"); el.className = "mini";
-    const w = 34 + 54 * Math.sqrt(size(c) / max); el.style.width = w + "px";
+    const w = bw(c); el.style.width = w + "px";
     el.innerHTML = inner(c, i);
     el.title = c.name;
     yard.appendChild(el);
     const h = w * 92 / 60;
     const rnd = seed(c.name);
-    const m = { el, w, h, rnd, v: 0, x: rnd() * (W() - w), y: 20 + rnd() * (H() - h - 40), tx: 0, ty: 0, wait: rnd() * 2000,
+    const fx = rnd(), fy = rnd();
+    const m = { el, w, h, rnd, fx, fy, v: 0, x: fx * (W() - w), y: 10 + fy * Math.max(floor() - h - 24, 0), tx: 0, ty: 0, wait: rnd() * 2000,
       speed: (mood === "over" ? 70 : 32) * (1.4 - .6 * Math.sqrt(size(c) / max)) };
     el.addEventListener("click", () => { el.classList.add("talk"); m.wait = 2500; setTimeout(() => el.classList.remove("talk"), 2500); });
     return m;
@@ -256,12 +306,16 @@ YARD_JS = """<script>
     const [hd, more, , two] = WORDS[byCpu ? "cpu" : "mem"], wrap = yard.closest(".yard-wrap");
     if (wrap) { wrap.querySelector(".yard-head b").textContent = hd; wrap.querySelector(".yard-key span:last-child").textContent = two;
       wrap.querySelector(".yard-head span").textContent = `One buddy per app and per Claude Code session. Bigger buddy, ${more}. Click one to ask.`; }
-    mobs.forEach((m, i) => { const c = crowd[i], w = 34 + 54 * Math.sqrt(size(c) / max);
+    mobs.forEach((m, i) => { const c = crowd[i], w = bw(c);
       m.w = w; m.h = w * 92 / 60; m.el.style.width = w + "px"; m.el.innerHTML = inner(c, i);
       m.speed = (mood === "over" ? 70 : 32) * (1.4 - .6 * Math.sqrt(size(c) / max));
-      m.x = Math.min(m.x, Math.max(W() - w, 0)); m.y = Math.min(m.y, Math.max(H() - m.h - 20, 0)); place(m); });
+      m.x = Math.min(m.x, Math.max(W() - w, 0)); m.y = Math.min(m.y, Math.max(floor() - m.h - 24, 0));
+      m.tx = Math.min(m.tx, Math.max(W() - w, 0)); m.ty = Math.min(m.ty, Math.max(floor() - m.h - 24, 0)); place(m); });
   };
   document.querySelectorAll(".mt").forEach(b => b.addEventListener("click", () => apply(b.dataset.m)));
+  // The yard settles its size after the buddies are placed (fonts, the header fitting, a phone): resize and re-fence them then.
+  let lastSize = ""; if (window.ResizeObserver) new ResizeObserver(() => { const k = W() + "x" + floor(); if (k !== lastSize) { lastSize = k; apply(byCpu ? "cpu" : "mem");
+    mobs.forEach(m => { m.x = m.tx = m.fx * Math.max(W() - m.w, 0); m.y = m.ty = 10 + m.fy * Math.max(floor() - m.h - 24, 0); place(m); }); } }).observe(yard);
   try { const mm = localStorage.getItem("mm-measure"); if (mm && (mm === "cpu") !== byCpu) apply(mm); } catch (_) {}
   if (still) return;
   let last = performance.now();
@@ -273,7 +327,7 @@ YARD_JS = """<script>
       const dx = m.tx - m.x, dy = m.ty - m.y, d = Math.hypot(dx, dy);
       if (d < 2) {  // arrived: pause, then pick somewhere new in the yard
         m.wait = 400 + m.rnd() * (mood === "over" ? 600 : 3200); m.v = 0;
-        m.tx = m.rnd() * (W() - m.w); m.ty = 10 + m.rnd() * (H() - m.h - 30); continue;
+        m.tx = m.rnd() * (W() - m.w); m.ty = 10 + m.rnd() * Math.max(floor() - m.h - 24, 0); continue;
       }
       const want = Math.min(m.speed, d * 1.6);  // slow down on arrival
       m.v += (want - m.v) * Math.min(1, dt * 3);  // and speed up gently on departure

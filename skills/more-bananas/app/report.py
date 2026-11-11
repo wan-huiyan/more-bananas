@@ -793,11 +793,11 @@ def render(v):
 
     # ---------- What uses memory: app groups over a time window, Claude's work opened up ----------
     a_last = max(apps_all) if apps_all else ""
-    def uses_view(hours, src, tsrc, cpu):
-        fmt = (lambda x: f"{x:.0f}%") if cpu else (lambda x: f"{x:.1f} GB")
+    def use_avg(hours, src):
+        """Each app group's average and busiest minute over the last `hours` (0 = the latest reading)."""
         last = max(src) if src else ""
         if not last:
-            return '<p class=note>' + ("The per-app processor log starts with the next reading." if cpu else "No readings yet.") + '</p>', 0
+            return {}, {}, []
         if hours == 0:
             mins = [last]
         else:
@@ -807,7 +807,12 @@ def render(v):
         for t in mins:
             for g, x in src[t].items():
                 tot[g] = tot.get(g, 0) + x; top_[g] = max(top_.get(g, 0), x)
-        avg = {g: x / len(mins) for g, x in tot.items()}
+        return {g: x / len(mins) for g, x in tot.items()}, top_, mins
+    def uses_view(hours, src, tsrc, cpu):
+        fmt = (lambda x: f"{x:.0f}%") if cpu else (lambda x: f"{x:.1f} GB")
+        avg, top_, mins = use_avg(hours, src)
+        if not mins:
+            return '<p class=note>' + ("The per-app processor log starts with the next reading." if cpu else "No readings yet.") + '</p>', 0
         tmins = [t for t in mins if t in tsrc]
         sc = max(avg.values()) if avg else 1
         desc = dict(KINDS)
@@ -847,6 +852,15 @@ def render(v):
     cuses_tabs, cuses_views = uses_block(capps, tjc, True)
     # The processors view comes first wherever the processors held the Mac up more.
     m_first = "cpu" if cpu_first and capps else "mem"
+    # The podium: the three app groups with the highest average, per time window, ranked exactly as the list beside it
+    # (same rows, same cut-offs), leaving out the catch-all "Other apps" and the old Chrome + test browsers mix.
+    def podium_top(hours, src, cpu):
+        avg = use_avg(hours, src)[0]
+        keep = [(g, x) for g, x in sorted(avg.items(), key=lambda kv: -kv[1])
+                if x >= (.5 if cpu else .05) and g != "Other apps" and "not split" not in g]
+        return [[g, round(x, 0 if cpu else 1)] for g, x in keep[:3]]
+    podium_json = json.dumps({"first": m_first, "wins": {vid: {"mem": podium_top(h_, apps_all, False), "cpu": podium_top(h_, capps, True) if capps else []}
+                                                         for vid, h_ in (("now", 0), ("d1", 24), ("d7", 168), ("d30", 720))}}).replace("</", "<\\/")
     m_first_c = "cpu" if m_first == "cpu" and len(tjc) >= 60 else "mem"
     v["yard_measure"] = m_first          # buddy.py sizes the yard's buddies by the same measure (memlog.py reads it back)
     def mtabs(panel, first):
@@ -1170,7 +1184,7 @@ details.storagebox{{font-size:13px}} details.storagebox>.c{{border:0;padding:8px
 <section class=panel id=p-uses role=tabpanel><div class=inner>
 <div class=en><p class=kick>Every app, and what Claude runs underneath, refreshed every minute</p><h2 class=big>What uses <em>{"the Mac" if capps else "memory"}</em></h2></div>
 <div class=whogrid>
-<div class=en style="--n:1"><!--YARD--></div>
+<div class=en style="--n:1"><!--YARD--><script type=application/json id=podium-data>{podium_json}</script></div>
 <div class=en style="--n:2"><div class=usebar><div class="jtabs vtabs" role=group aria-label="Show"><button type=button class="jt vt" data-vv=apps aria-pressed=true>Apps</button><button type=button class="jt vt" data-vv=claude aria-pressed=false>Claude&#x27;s tools</button></div>{mtabs("uses", m_first)}</div>
 <div class=vv data-vv=apps>
 {f"""<div class="c jobs mbox" data-m=cpu{"" if m_first == "cpu" else " hidden"}><div class=jtabs role=group aria-label="Time window">{cuses_tabs}</div>{cuses_views}
