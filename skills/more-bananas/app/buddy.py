@@ -184,14 +184,15 @@ YARD_CSS = """
 }
 .podcard{padding:12px 16px 0!important;margin-bottom:12px;overflow:hidden}
 .podiums{display:flex;justify-content:space-evenly;align-items:flex-end;gap:24px;height:100%}
-.pod{margin:0;flex:1 1 0;min-width:0;max-width:330px}
+.pod{margin:0;flex:0 1 600px;min-width:0}
+.podnone{margin:auto;color:var(--mute);font-size:13px}
 .steps{border-bottom:3px solid var(--line)}
 .pod figcaption{font-size:12px;color:var(--mute);text-align:center;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pod figcaption b{font:600 15px Fredoka,sans-serif;color:var(--fg)}
 .steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end}
 .step{display:flex;flex-direction:column;align-items:center;min-width:0}
-.podiums .mini{position:relative;left:auto;top:auto;cursor:default;will-change:auto;width:48%;margin-bottom:-3px}
-.step.s1 .mini{width:60%} .step.s3 .mini{width:44%}
+.podiums .mini{position:relative;left:auto;top:auto;cursor:default;will-change:auto;width:min(48%,50px);margin-bottom:-3px}
+.step.s1 .mini{width:min(60%,58px)} .step.s3 .mini{width:min(44%,46px)}
 .medal{position:absolute;right:-6px;top:38%;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font:700 11px/1 Fredoka,sans-serif;font-style:normal;
  color:#1d2a44;background:var(--mc);box-shadow:0 0 0 2px var(--card),0 2px 4px rgba(0,0,0,.18)}
 .blk{align-self:stretch;display:flex;flex-direction:column;justify-content:center;gap:1px;padding:4px 5px;text-align:center;color:#1d2a44;
@@ -258,15 +259,19 @@ YARD_JS = """<script>
   let pod = null; try { pod = JSON.parse(document.getElementById("podium-data").textContent); } catch (_) {}
   const stage = document.createElement("div"); stage.className = "podiums";
   const WIN = { now: "right now", d1: "24 hours, average", d7: "7 days, average", d30: "30 days, average" };
-  const drawPodium = win => {
+  // One podium, for whichever the page's Processors / Memory switch shows.
+  let podWin = "now", podM = pod ? pod.first : "mem";
+  try { podM = localStorage.getItem("mm-measure") || podM; } catch (_) {}
+  const drawPodium = (win = podWin, measure = podM) => {
+    podWin = win; podM = measure;
     const w = pod && pod.wins[win]; if (!w) { stage.innerHTML = ""; return; }
-    const order = pod.first === "cpu" ? ["cpu", "mem"] : ["mem", "cpu"];
-    stage.innerHTML = order.filter(m => w[m] && w[m].length).map(m => {
+    if (!(w[podM] && w[podM].length)) { stage.innerHTML = `<p class=podnone>No ${podM === "cpu" ? "processor" : "memory"} readings in this window yet.</p>`; return; }
+    stage.innerHTML = [podM].map(m => {
       const val = x => m === "cpu" ? Math.round(x) + "% of cores" : x.toFixed(1) + " GB";
       const esc = t => t.replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
       const top = w[m].map(([name, x], i) => ({ name: esc(name), x, rank: i + 1 }));
       const steps = [top[1], top[0], top[2]].filter(Boolean).map(t => {
-        const c = { name: t.name, kind: t.name === "Claude Code sessions" ? "claude" : "app", gb: m === "mem" ? t.x : 0, cpu: m === "cpu" ? t.x : 0 };
+        const c = { name: t.name, kind: /^Claude Code|^Claude\u2019s|^Claude's/.test(t.name) ? "claude" : "app", gb: m === "mem" ? t.x : 0, cpu: m === "cpu" ? t.x : 0 };
         return `<div class="step s${t.rank}" title="${t.rank}. ${t.name}: ${val(t.x)}"><div class="mini busy">${svg(c, "p" + m + t.rank, m)}<i class=medal>${t.rank}</i></div>`
           + `<div class=blk><b>${t.name}</b><em>${val(t.x)}</em></div></div>`;
       }).join("");
@@ -279,7 +284,8 @@ YARD_JS = """<script>
   if (pod && host) {
     host.appendChild(stage); drawPodium(winNow());
     const panel = yard.closest(".panel");
-    if (panel) panel.addEventListener("click", ev => { const b = ev.target.closest(".jobs .jt"); if (b && b.dataset.v) drawPodium(b.dataset.v); });
+    if (panel) panel.addEventListener("click", ev => { const b = ev.target.closest(".jobs .jt"); if (b && b.dataset.v) drawPodium(b.dataset.v);
+      const mt = ev.target.closest(".mt"); if (mt && mt.dataset.m) drawPodium(podWin, mt.dataset.m); });
   }
   if (!crowd.length) return;
   const W = () => yard.clientWidth, H = () => yard.clientHeight;

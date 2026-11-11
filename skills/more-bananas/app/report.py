@@ -854,12 +854,33 @@ def render(v):
     m_first = "cpu" if cpu_first and capps else "mem"
     # The podium: the three app groups with the highest average, per time window, ranked exactly as the list beside it
     # (same rows, same cut-offs), leaving out the catch-all "Other apps" and the old Chrome + test browsers mix.
-    def podium_top(hours, src, cpu):
-        avg = use_avg(hours, src)[0]
-        keep = [(g, x) for g, x in sorted(avg.items(), key=lambda kv: -kv[1])
-                if x >= (.5 if cpu else .05) and g != "Other apps" and "not split" not in g]
+    # Apps and the coding agents' tools compete on one podium: the two lumped Claude rows ("Tools Claude starts",
+    # "Browsers Claude drives") are replaced by each kind of tool on its own. Each lumped row keeps the list's total and
+    # is split by the kinds' shares in Claude's own tool log, so the podium and the list never disagree.
+    POD_KIND = {KINDS[0][0]: "Claude's test browsers", KINDS[1][0]: "Claude's plug-ins", KINDS[2][0]: "Claude's page checks",
+                KINDS[3][0]: "Claude's cloud tools", KINDS[4][0]: "Claude's build scripts", KINDS[5][0]: "Claude's shell"}
+    POD_NAME = {"Tools started by Codex": "Codex's tools"}
+    def podium_top(hours, src, tsrc, cpu):
+        avg, _, mins = use_avg(hours, src)
+        ent = {POD_NAME.get(g, g): x for g, x in avg.items() if g not in ("Other apps", "Tools Claude starts", BR) and "not split" not in g}
+        tmins = [t for t in mins if t in tsrc]
+        share = {}
+        for t in tmins:
+            for (se, jb), x in tsrc[t].items():
+                k_ = kind(jb); share[k_] = share.get(k_, 0) + x
+        for g, kinds_, fallback in ((BR, KINDS[:1], "Claude's test browsers"), ("Tools Claude starts", KINDS[1:], "Claude's other tools")):
+            tot_ = sum(share.get(k_, 0) for k_, _ in kinds_)
+            if g not in avg:
+                continue
+            if tot_ <= 0:
+                ent[fallback] = ent.get(fallback, 0) + avg[g]
+                continue
+            for k_, _ in kinds_:
+                if share.get(k_):
+                    ent[POD_KIND[k_]] = ent.get(POD_KIND[k_], 0) + avg[g] * share[k_] / tot_
+        keep = [(g, x) for g, x in sorted(ent.items(), key=lambda kv: -kv[1]) if x >= (.5 if cpu else .05)]
         return [[g, round(x, 0 if cpu else 1)] for g, x in keep[:3]]
-    podium_json = json.dumps({"first": m_first, "wins": {vid: {"mem": podium_top(h_, apps_all, False), "cpu": podium_top(h_, capps, True) if capps else []}
+    podium_json = json.dumps({"first": m_first, "wins": {vid: {"mem": podium_top(h_, apps_all, tj, False), "cpu": podium_top(h_, capps, tjc, True) if capps else []}
                                                          for vid, h_ in (("now", 0), ("d1", 24), ("d7", 168), ("d30", 720))}}).replace("</", "<\\/")
     m_first_c = "cpu" if m_first == "cpu" and len(tjc) >= 60 else "mem"
     v["yard_measure"] = m_first          # buddy.py sizes the yard's buddies by the same measure (memlog.py reads it back)
@@ -1099,7 +1120,7 @@ h2.big{{font-size:clamp(1.6rem,2.7vw,2.5rem)}} .lede{{max-width:none;font-size:1
 #p-today .two{{align-items:stretch}} #p-today .tmem>.c:last-child .list{{max-height:calc(100dvh - 310px);overflow:auto}}
 svg.hist{{height:calc(100dvh - 430px);width:auto;max-width:100%;margin:0 auto}}
 .howc ul{{display:block;columns:2;column-gap:32px;font-size:12.5px;line-height:1.4;max-width:none}} @media(min-width:1200px){{.howc ul{{columns:3}}}} .howc li{{break-inside:avoid;margin-bottom:8px}}
-.whogrid{{grid-template-columns:1fr 1fr}} .yard{{height:calc(100dvh - 320px)!important}} .jobs .list{{max-height:calc(100dvh - 380px)}} .podcard{{height:196px}} .vv[data-vv=apps] .jobs .list{{max-height:calc(100dvh - 590px)}}
+.whogrid{{grid-template-columns:1fr 1fr}} .yard{{height:calc(100dvh - 320px)!important}} .jobs .list{{max-height:calc(100dvh - 380px)}} .podcard{{height:196px}} .whogrid .jobs .list{{max-height:calc(100dvh - 590px)}} .whogrid .vv[data-vv=claude] .jobs .list{{max-height:calc(100dvh - 616px)}}
 .row.ur{{grid-template-columns:minmax(0,11rem) 1fr 5.4rem}} .row.ur em{{white-space:nowrap}}
 .whogrid>div:last-child,.whogrid .vv:not([hidden]){{display:flex;flex-direction:column}} .whogrid .vv:not([hidden]){{flex:1}} .whogrid .mbox:not([hidden]){{flex:1}}
 .usebar{{display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between}} .usebar .jtabs{{margin-bottom:10px}}
@@ -1188,8 +1209,8 @@ details.storagebox{{font-size:13px}} details.storagebox>.c{{border:0;padding:8px
 <div class=whogrid>
 <div class=en style="--n:1"><!--YARD--><script type=application/json id=podium-data>{podium_json}</script></div>
 <div class=en style="--n:2"><div class=usebar><div class="jtabs vtabs" role=group aria-label="Show"><button type=button class="jt vt" data-vv=apps aria-pressed=true>Apps</button><button type=button class="jt vt" data-vv=claude aria-pressed=false>Claude&#x27;s tools</button></div>{mtabs("uses", m_first)}</div>
+<div class="c podcard" id=podium-host aria-label="The three apps or coding-agent tools using the most of the processors or memory"></div>
 <div class=vv data-vv=apps>
-<div class="c podcard" id=podium-host aria-label="The three apps using the most processors and the most memory"></div>
 {f"""<div class="c jobs mbox" data-m=cpu{"" if m_first == "cpu" else " hidden"}><div class=jtabs role=group aria-label="Time window">{cuses_tabs}</div>{cuses_views}
 <p class=note style="margin-top:10px">Each app&#x27;s share of all {cores_n} cores. Tap a Claude row to see its groups and scripts.</p></div>""" if capps else ""}
 <div class="c jobs mbox" data-m=mem{"" if m_first == "mem" else " hidden"}><div class=jtabs role=group aria-label="Time window">{uses_tabs}</div>{uses_views}

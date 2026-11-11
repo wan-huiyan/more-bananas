@@ -14,7 +14,7 @@ sys.path.insert(0, str(APP))
 import report
 
 
-def podium_for(apps, cpu_apps=None):
+def podium_for(apps, cpu_apps=None, tools=None):
     """Render the page from per-app memory (and optionally processor) readings, and return its podium data."""
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -28,6 +28,8 @@ def podium_for(apps, cpu_apps=None):
         (root / 'apps.csv').write_text(''.join(f'{t},{g},{x}\n' for t in times for g, x in apps.items()))
         if cpu_apps:
             (root / 'cpu_apps.csv').write_text(''.join(f'{t},{g},{x}\n' for t in times for g, x in cpu_apps.items()))
+        if tools:
+            (root / 'tools.csv').write_text(''.join(f'{t},session-a,{job},{x}\n' for t in times for job, x in tools.items()))
         values = helpers.MissingRateReportTests().page_data(directory)
         values.update(HOME=directory, stamp=times[-1], TOTAL_GB=24, out_mb=0, cfg={}, terms=1,
                       mood='calm', tone='#34d399', fav='', by_group={}, now_d={}, cores=10,
@@ -54,6 +56,22 @@ class PodiumTests(unittest.TestCase):
     def test_processor_podium_ranks_share_of_the_cores_and_drops_tiny_ones(self):
         pod = podium_for({'Chrome (incl. Meet)': 3.5}, {'Google Drive': 14, 'macOS system': 13, 'Safari': 0.2, 'Other apps': 40})
         self.assertEqual(pod['wins']['now']['cpu'], [['Google Drive', 14], ['macOS system', 13]])
+
+
+    def test_claude_tools_place_by_kind_and_keep_the_lists_totals(self):
+        # The list lumps Claude's tools into two rows; the podium splits them by kind, scaled to those rows' totals.
+        pod = podium_for({'Browsers Claude drives': 2.9, 'Tools Claude starts': 1.0, 'macOS system': 2.4, 'Slack': 0.4},
+                         tools={'Chrome opened by check_dashboard.py': 2.0, 'build_page.py': 0.4, 'check_dashboard.py': 0.1})
+        top = dict(pod['wins']['now']['mem'])
+        self.assertEqual(list(top), ["Claude's test browsers", 'macOS system', "Claude's build scripts"])
+        self.assertEqual(top["Claude's test browsers"], 2.9)
+        self.assertEqual(top["Claude's build scripts"], 0.8)
+        for win in pod['wins'].values():
+            self.assertFalse({'Browsers Claude drives', 'Tools Claude starts'} & {g for g, _ in win['mem']})
+
+    def test_without_a_tool_log_the_lumped_rows_still_place_under_claudes_name(self):
+        pod = podium_for({'Browsers Claude drives': 2.9, 'Tools Claude starts': 1.0, 'macOS system': 0.4})
+        self.assertEqual([g for g, _ in pod['wins']['now']['mem']], ["Claude's test browsers", "Claude's other tools", 'macOS system'])
 
 
 if __name__ == '__main__':
