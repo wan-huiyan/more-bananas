@@ -196,7 +196,7 @@ def heat_section(home, today):
                     f'aria-label="Chip temperature, fan speed, processor and graphics load, disk traffic, memory pushed to disk and network traffic, minute by minute">'
                     f'{"".join(clips)}{"".join(svg)}{ticks}<line class=hxh x1=0 x2=0 y1=0 y2={H} /></svg>')
 
-        strips = draw(1000, 62, 40, 26, "w", True) + draw(420, 54, 34, 22, "n", False)
+        strips = draw(1000, 44, 30, 22, "w", True) + draw(420, 54, 34, 22, "n", False)
 
         # ---- headline: how long it ran hot, counted on minutes, never on points ----
         hot = [i for i in range(nm) if (raw["temp"][i] or 0) >= HOT_TEMP or (raw["fan"][i] or 0) >= LOUD_FAN]
@@ -326,6 +326,12 @@ HEAT_CSS = """
 .htip .r em{font:600 10.5px Geist,sans-serif;font-style:normal;text-transform:uppercase;letter-spacing:.04em;margin-left:6px;padding:1px 5px;border-radius:6px;background:var(--hot);color:#fff} .htip .ap{margin-top:5px;opacity:.85;font-size:12px}
 @media(max-width:1250px){.htiles{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:560px){.htiles{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px} .ht{padding:8px 9px!important;border-radius:16px!important} .ht .htn,.ht .hw{font-size:11px} .ht b{font-size:19px} .ht b small{font-size:10.5px;margin-left:1px}}
+@media (min-width:861px) and (min-height:600px){
+ .htiles{grid-template-columns:repeat(7,minmax(0,1fr))!important;gap:8px} .ht{padding:6px 10px!important;border-radius:14px!important;flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:0 8px}
+ .ht .htn{width:100%;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .ht b{font-size:19px} .ht .hw{font-size:11.5px}
+ #p-heat .hstrips.hwide{height:calc(100dvh - 412px);width:auto;max-width:100%;margin:0 auto}
+ #p-heat .two>.c:last-child .list{max-height:calc(100dvh - 380px);overflow:auto}
+}
 """
 
 HEAT_JS = """<script>

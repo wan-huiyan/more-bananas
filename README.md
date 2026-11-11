@@ -38,7 +38,7 @@ This measures instead. It reads macOS's own memory figures once a minute, keeps 
 | 🔥 | **Hot & slow** | Chip temperature, fan speed, processors, graphics, disk traffic, memory pushed to disk and network traffic, minute by minute, each with a "too much" line (90 °C, fan at 60%, more work than cores…). Plus which apps kept the processors busy while it ran hot. No admin rights needed. |
 | 📅 | **Busy days and busy hours** | One timeline since the history start: Claude Code sessions open at once above the line, below it the minutes something held the Mac up each day, coloured by what, then memory over your RAM. Plus a weekday × hour heatmap that opens on what held each hour up. |
 | 🧸 | **Who is using it** | One walking banana buddy per app and per Claude Code session, sized by processor share or memory (whichever held the Mac up more, and it follows the switch). Every app's processor share and memory now / 24 h / 7 days / 30 days, opening on whichever held the Mac up more. |
-| 🤖 | **What Claude runs** | Claude's tools grouped into plain kinds (test browsers, page checks, cloud tools, plug-ins, build scripts, shell), each opening into its scripts and the session folder that started them, by processor share or by memory. |
+| 🤖 | **What uses the Mac: Claude's tools** | Claude's tools grouped into plain kinds (test browsers, page checks, cloud tools, plug-ins, build scripts, shell), each opening into its scripts and the session folder that started them, by processor share or by memory. |
 | 🪶 | **Light** | One run takes about 0.6 s a minute and stores about 2 MB of readings a day. Nothing is sent anywhere. |
 | 🛟 | **Survives a dead laptop** | Optional copy of readings and page to Google Drive every 15 minutes. |
 
