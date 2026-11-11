@@ -900,6 +900,10 @@ def render(v):
         return tabs_, views_, ssrc
     uses_tabs, uses_views, apps_split = uses_block(apps_all, tj, False)
     cuses_tabs, cuses_views, capps_split = uses_block(capps, tjc, True)
+    # The yard's buddies split the same way: this minute's figure for each kind of tool (memlog.py reads it back).
+    _la, _lc = (apps_split[max(apps_split)] if apps_split else {}), (capps_split[max(capps_split)] if capps_split else {})
+    v["yard_split"] = {g: {"gb": round(_la.get(g, 0), 2), "cpu": round(_lc.get(g, 0), 1)}
+                       for g in set(POD_KIND.values()) | {"Claude's other tools", "Codex's tools"} if g in _la or g in _lc}
     # The processors view comes first wherever the processors held the Mac up more.
     m_first = "cpu" if cpu_first and capps else "mem"
     # The podium: the top three rows of the list beside it (same split rows, same window, same cut-offs), leaving out

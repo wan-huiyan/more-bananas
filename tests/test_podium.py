@@ -14,7 +14,7 @@ sys.path.insert(0, str(APP))
 import report
 
 
-def page_for(apps, cpu_apps=None, tools=None):
+def page_for(apps, cpu_apps=None, tools=None, keep=None):
     """Render the page from per-app memory (and optionally processor and Claude tool) readings."""
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -34,7 +34,10 @@ def page_for(apps, cpu_apps=None, tools=None):
         values.update(HOME=directory, stamp=times[-1], TOTAL_GB=24, out_mb=0, cfg={}, terms=1,
                       mood='calm', tone='#34d399', fav='', by_group={}, now_d={}, cores=10,
                       load1=4, swapped_total_gb=0, comp_gb=2, wired_gb=3, squeezed_gb=4, hours='all')
-        return report.render(values)
+        page = report.render(values)
+        if keep is not None:
+            keep.update(values)
+        return page
 
 
 def podium_for(apps, cpu_apps=None, tools=None):
@@ -88,6 +91,16 @@ class PodiumTests(unittest.TestCase):
         self.assertNotIn('Browsers Claude drives', rows)
         self.assertNotIn('Tools Claude starts', rows)
         self.assertIn('build_page.py', page)        # each kind opens into its scripts
+
+
+    def test_the_yard_gets_this_minutes_split_by_kind(self):
+        values = {}
+        page_for({'Browsers Claude drives': 2.9, 'Tools Claude starts': 1.0, 'macOS system': 2.4},
+                 tools={'Chrome opened by check_dashboard.py': 2.0, 'build_page.py': 0.4, 'check_dashboard.py': 0.1}, keep=values)
+        split = values['yard_split']
+        self.assertEqual(split["Claude's test browsers"]['gb'], 2.9)
+        self.assertEqual(split["Claude's build scripts"]['gb'], 0.8)
+        self.assertNotIn('Browsers Claude drives', split)
 
 
 if __name__ == '__main__':

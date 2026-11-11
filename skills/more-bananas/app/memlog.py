@@ -442,8 +442,21 @@ if wdata:
     wctx.update(HOME=WDIR, hours="work", hours_txt=work_txt, here=OUT_WORK, other=OUT,
                 hrs=list(range(_h0, _h1)), wds=_ds, days=[d for d in wdata["days"] if dt.date.fromisoformat(d).weekday() in WORK_D])
     pages.append((OUT_WORK, wctx))
+LUMPED = ("Tools Claude starts", "Browsers Claude drives", "Tools started by Codex")
+
+
+def crowd_for(c_):
+    """The yard's buddies, with Claude's and Codex's tools one buddy per kind (as report.py split them this minute)."""
+    split = c_.get("yard_split")
+    if split is None:
+        return crowd
+    tools_ = [{"name": g, "gb": x["gb"], "cpu": x["cpu"], "kind": "tool"} for g, x in split.items() if x["gb"] >= 0.1 or x["cpu"] >= 1]
+    return sorted([b for b in crowd if b["name"] not in LUMPED] + tools_, key=lambda b: (b["kind"] == "claude", -b["gb"]))
+
+
 for out_, c_ in pages:
-    html_page = theme(render(c_), mood, crowd, c_.get("yard_measure", "mem"))
+    page_ = render(c_)
+    html_page = theme(page_, mood, crowd_for(c_), c_.get("yard_measure", "mem"))
     open(out_ + ".tmp", "w").write(html_page)
     os.replace(out_ + ".tmp", out_)
 

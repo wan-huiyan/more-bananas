@@ -129,9 +129,9 @@ YARD_WORDS = {
     "mem": ("Who is in your RAM right now", "more memory", "memory", "two goggles = over 1 GB"),
 }
 YARD = """<section class="yard-wrap rise" style="animation-delay:.2s">
-<div class=yard-head><b>__HEAD__</b><span>One buddy per app and per Claude Code session. Bigger buddy, __MORE__. Click one to ask.</span></div>
+<div class=yard-head><b>__HEAD__</b><span>One buddy per app, tool kind and Claude session. Bigger buddy, __MORE__. Click one.</span></div>
 <div class=yard id=yard aria-label="Animated buddies, one per app and Claude Code session, sized by __BY__"></div>
-<div class=yard-key><span><i style="background:#2f6fb5"></i>an app</span><span><i style="background:#d97757"></i>a Claude Code session</span><span>__TWO__</span></div>
+<div class=yard-key><span><i style="background:#2f6fb5"></i>an app</span><span><i style="background:#3a9d7a"></i>a Claude or Codex tool</span><span><i style="background:#d97757"></i>a Claude Code session</span><span>__TWO__</span></div>
 </section>"""
 
 YARD_CSS = """
@@ -217,7 +217,9 @@ YARD_JS = """<script>
   let max = Math.max(...crowd.map(size), byCpu ? 1 : .1);
   const gbTxt = gb => gb >= 1 ? gb.toFixed(1) + " GB" : Math.round(gb * 1024) + " MB";
   // Each buddy holds the thing it is (huashu: a character's action must be about the content, not just blink and bob).
-  const PROP = n => /Claude desktop/.test(n) ? "chat" : /Chrome/.test(n) ? "tabs"
+  const PROP = n => /test browsers/.test(n) ? "tabs" : /page checks/.test(n) ? "shield" : /plug-ins/.test(n) ? "gear"
+    : /cloud tools/.test(n) ? "folder" : /shell/.test(n) ? "laptop" : /build scripts|other tools|Codex's tools/.test(n) ? "wrench"
+    : /Claude desktop/.test(n) ? "chat" : /Chrome/.test(n) ? "tabs"
     : /macOS/.test(n) ? "gear" : /Slack/.test(n) ? "chat" : /Safari/.test(n) ? "compass" : /Security/.test(n) ? "shield"
     : /Tools/.test(n) ? "wrench" : /Drive/.test(n) ? "folder" : "banana";
   const PROPS = {
@@ -232,7 +234,7 @@ YARD_JS = """<script>
     banana: '<g class="p-banana"><path d="M14 74c6 10 24 10 30-6 1-3-1-5-2-4-1 8-12 14-28 10z" fill="#ffd93b" stroke="#c99700"/></g>'
   };
   const svg = (c, uid, m) => {
-    const suit = c.kind === "claude" ? "#d97757" : "#2f6fb5", suitD = c.kind === "claude" ? "#b85e40" : "#1f4d86",
+    const suit = { claude: "#d97757", tool: "#3a9d7a" }[c.kind] || "#2f6fb5", suitD = { claude: "#b85e40", tool: "#25735a" }[c.kind] || "#1f4d86",
       two = (m || (byCpu ? "cpu" : "mem")) === "cpu" ? (c.cpu || 0) >= 10 : (c.gb || 0) >= 1;
     const lens = (x, r) => `<circle cx="${x}" cy="30" r="${r}" fill="#fff" stroke="#9aa3ad" stroke-width="3"/><circle cx="${x}" cy="30" r="${r}" fill="none" stroke="#6b7480" stroke-width="1" />` +
       `<g class="pupil"><circle cx="${x}" cy="31" r="${r * .45}" fill="#7a4b23"/><circle cx="${x}" cy="31" r="${r * .22}" fill="#1b1b1b"/></g><circle cx="${x - r * .35}" cy="${30 - r * .4}" r="${r * .22}" fill="#fff" opacity=".9"/>`;
@@ -271,7 +273,7 @@ YARD_JS = """<script>
       const esc = t => t.replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
       const top = w[m].map(([name, x], i) => ({ name: esc(name), x, rank: i + 1 }));
       const steps = [top[1], top[0], top[2]].filter(Boolean).map(t => {
-        const c = { name: t.name, kind: /^Claude Code|^Claude\u2019s|^Claude's/.test(t.name) ? "claude" : "app", gb: m === "mem" ? t.x : 0, cpu: m === "cpu" ? t.x : 0 };
+        const c = { name: t.name, kind: /^Claude Code/.test(t.name) ? "claude" : /^Claude's|^Codex's/.test(t.name) ? "tool" : "app", gb: m === "mem" ? t.x : 0, cpu: m === "cpu" ? t.x : 0 };
         return `<div class="step s${t.rank}" title="${t.rank}. ${t.name}: ${val(t.x)}"><div class="mini busy">${svg(c, "p" + m + t.rank, m)}<i class=medal>${t.rank}</i></div>`
           + `<div class=blk><b>${t.name}</b><em>${val(t.x)}</em></div></div>`;
       }).join("");
@@ -315,7 +317,7 @@ YARD_JS = """<script>
     byCpu = ms === "cpu"; max = Math.max(...crowd.map(size), byCpu ? 1 : .1);
     const [hd, more, , two] = WORDS[byCpu ? "cpu" : "mem"], wrap = yard.closest(".yard-wrap");
     if (wrap) { wrap.querySelector(".yard-head b").textContent = hd; wrap.querySelector(".yard-key span:last-child").textContent = two;
-      wrap.querySelector(".yard-head span").textContent = `One buddy per app and per Claude Code session. Bigger buddy, ${more}. Click one to ask.`; }
+      wrap.querySelector(".yard-head span").textContent = `One buddy per app, tool kind and Claude session. Bigger buddy, ${more}. Click one.`; }
     mobs.forEach((m, i) => { const c = crowd[i], w = bw(c);
       m.w = w; m.h = w * 92 / 60; m.el.style.width = w + "px"; m.el.innerHTML = inner(c, i);
       m.speed = (mood === "over" ? 70 : 32) * (1.4 - .6 * Math.sqrt(size(c) / max));

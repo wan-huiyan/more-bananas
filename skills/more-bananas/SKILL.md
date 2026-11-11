@@ -46,7 +46,7 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
    switch), over the same window as the list (now, 24 hours, 7 days or 30 days, averaged; one window for every list
    on the tab). Apps and the coding agents' tools compete together, in the podium and the list: each kind of Claude tool
    (test browsers, build scripts, page checks...) is its own row, split minute by minute from the lumped app group by
-   Claude's tool log, and opens into its scripts; Codex's tools have their own row; "Other apps" never places. Beside it a walking buddy per app and per Claude session (sized by processor share or memory,
+   Claude's tool log, and opens into its scripts; Codex's tools have their own row; "Other apps" never places. Beside it a walking buddy per app, per kind of Claude or Codex tool (green suit) and per Claude session (sized by processor share or memory,
    following the same switch), plus every app group's processor share and memory
    now / 24 h / 7 days / 30 days (average and busiest minute); Claude's tools and test browsers expand into
    groups and scripts. An Apps / Claude's tools switch shows Claude's tools and hidden test browsers by kind
