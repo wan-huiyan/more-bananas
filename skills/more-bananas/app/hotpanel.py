@@ -26,8 +26,6 @@ STRIPS = [
      "line_txt": "1 GB a minute: heavy", "words": ("fine", "busy", "heavy"), "mid": 300},
     {"k": "swap", "name": "Memory pushed to disk", "unit": "MB a minute", "lo": 0, "hi": None, "line": 100,
      "line_txt": "100 MB a minute: swapping hard", "words": ("calm", "a little", "swapping hard"), "mid": 5},
-    {"k": "net", "name": "Network in and out", "unit": "MB a minute", "lo": 0, "hi": None, "line": 500,
-     "line_txt": "500 MB a minute: heavy", "words": ("light", "busy", "heavy"), "mid": 100},
 ]
 HOT_TEMP, LOUD_FAN = 90, 60   # a minute counts as "ran hot" when the chip reached 90 °C or the fan passed 60%
 SWAP_HARD = 100               # MB a minute pushed to disk: memory is holding the Mac up
@@ -99,8 +97,6 @@ def heat_section(home, today):
     for r in _rows(os.path.join(home, "io.csv"), 5):
         a, b = _num(r[1]), _num(r[2])
         by["disk"][r[0]] = a + b if a is not None and b is not None else None
-        c, d = _num(r[3]), _num(r[4])
-        by["net"][r[0]] = c + d if c is not None and d is not None else None
     for r in _rows(os.path.join(home, "live.csv"), 6):
         by["swap"][r[0]] = _num(r[1])
     apps = {}
@@ -183,7 +179,7 @@ def heat_section(home, today):
                           f'<polyline class=hlhot points="{pts}" clip-path="url(#{cid})"/>']
                 if not runs:
                     g.append(f'<text class=hnone x={W / 2} y={y0 + SH / 2 + 5} text-anchor=middle>{"No readings yet: this Mac has not reported it." if wide else "no readings yet"}</text>')
-                elif runs[0][0][0] > 30:                       # the measure started later than the window
+                elif runs[0][0][0] > 30 and X(runs[0][0][0]) > (260 if wide else 130):   # started later than the window, with room for the label
                     g.append(f'<text class=hnone x={X(runs[0][0][0]) - 6:.1f} y={y0 + SH - 8} text-anchor=end>{"measured " if wide else ""}from {e(lab(minute[runs[0][0][0]]))}</text>')
                 line_txt = "dotted line: " + s["line_txt"] if wide else s["line_txt"].split(":")[0]
                 g.append(f'<line class=hthr x1=0 x2={W} y1={ly:.1f} y2={ly:.1f} /><text class=htk x={W - 2} y={y0 - 10} text-anchor=end>{e(line_txt)}</text></g>')
@@ -193,7 +189,7 @@ def heat_section(home, today):
             ticks = "".join(f'<text class=htk x="{X(i):.1f}" y="{H + 20}" text-anchor="{"start" if i == 0 else "end" if i == n - 1 else "middle"}">{minute[i][11:] if not ml else minute[i][5:10].replace("-", "/") + " " + minute[i][11:]}</text>'
                             for i in sorted({0, n - 1, *range(0, n, every)}) if i == n - 1 or n - 1 - i > n / (14 if wide else 6))
             return (f'<svg class="hstrips {"hwide" if wide else "hnarrow"}" data-w={W} viewBox="0 0 {W} {H + 30}" role=img '
-                    f'aria-label="Chip temperature, fan speed, processor and graphics load, disk traffic, memory pushed to disk and network traffic, minute by minute">'
+                    f'aria-label="Chip temperature, fan speed, processor and graphics load, disk traffic and memory pushed to disk, minute by minute">'
                     f'{"".join(clips)}{"".join(svg)}{ticks}<line class=hxh x1=0 x2=0 y1=0 y2={H} /></svg>')
 
         strips = draw(1000, 44, 30, 22, "w", True) + draw(420, 54, 34, 22, "n", False)
@@ -242,7 +238,7 @@ def heat_section(home, today):
         data = {"t": minute, "s": {k: [None if x is None else round(x, 1) for x in v] for k, v in series.items()},
                 "state": st, "apps": papps, "n": n, "b": b, "ml": ml,
                 "names": {s["k"]: "Processors: work waiting" if s["k"] == "cpu" else s["name"] for s in STRIPS}, "units": {s["k"]: s["unit"] for s in STRIPS}}
-        note = (f'<p class="note en" style="--n:5">Temperature, fan, graphics, disk and network are measured from {e(lab(rawmin[first_i]))}{" today" if when == "Today" else ""}; processors and memory from earlier.</p>'
+        note = (f'<p class="note en" style="--n:5">Temperature, fan, graphics and disk are measured from {e(lab(rawmin[first_i]))}{" today" if when == "Today" else ""}; processors and memory from earlier.</p>'
                 if first_i is not None and first_i > 30 else "")
         return raw, rawmin, f"""<div class=rv data-r={r}{"" if r == 1 else " hidden"}>
 <div class=en><h2 class=big>{head}</h2></div>
@@ -302,7 +298,7 @@ __TILES__
 
 HEAT_CSS = """
 /* Hot & slow tab */
-.htiles{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
+.htiles{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
 .ht{padding:10px 14px!important;border-radius:20px!important;display:flex;flex-direction:column;gap:2px;min-width:0}
 .ht .htn{font-size:12.5px;line-height:1.3;color:var(--mute)}
 .ht b{font:700 26px/1.1 Fredoka,sans-serif;color:var(--fg);white-space:nowrap} .ht b small{display:inline;margin-left:3px;font:600 13px Geist,sans-serif;color:var(--mute)}
@@ -327,9 +323,9 @@ HEAT_CSS = """
 @media(max-width:1250px){.htiles{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:560px){.htiles{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px} .ht{padding:8px 9px!important;border-radius:16px!important} .ht .htn,.ht .hw{font-size:11px} .ht b{font-size:19px} .ht b small{font-size:10.5px;margin-left:1px}}
 @media (min-width:861px) and (min-height:600px){
- .htiles{grid-template-columns:repeat(7,minmax(0,1fr))!important;gap:8px} .ht{padding:6px 10px!important;border-radius:14px!important;flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:0 8px}
+ .htiles{grid-template-columns:repeat(6,minmax(0,1fr))!important;gap:8px;margin-bottom:8px} .ht{padding:6px 10px!important;border-radius:14px!important;flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:0 8px}
  .ht .htn{width:100%;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .ht b{font-size:19px} .ht .hw{font-size:11.5px}
- #p-heat .hstrips.hwide{height:calc(100dvh - 412px);width:auto;max-width:100%;margin:0 auto}
+ #p-heat .hstrips.hwide{height:calc(100dvh - 430px);width:auto;max-width:100%;margin:0 auto}
  #p-heat .two>.c:last-child .list{max-height:calc(100dvh - 380px);overflow:auto}
 }
 """
