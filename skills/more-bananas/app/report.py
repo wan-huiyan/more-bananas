@@ -1099,7 +1099,9 @@ h2.big{{font-size:clamp(1.6rem,2.7vw,2.5rem)}} .lede{{max-width:none;font-size:1
 #p-today .two{{align-items:stretch}} #p-today .tmem>.c:last-child .list{{max-height:calc(100dvh - 310px);overflow:auto}}
 svg.hist{{height:calc(100dvh - 430px);width:auto;max-width:100%;margin:0 auto}}
 .howc ul{{display:block;columns:2;column-gap:32px;font-size:12.5px;line-height:1.4;max-width:none}} @media(min-width:1200px){{.howc ul{{columns:3}}}} .howc li{{break-inside:avoid;margin-bottom:8px}}
-.whogrid{{grid-template-columns:1fr 1fr}} .yard{{height:calc(100dvh - 320px)!important}} .jobs .list{{max-height:calc(100dvh - 380px)}}
+.whogrid{{grid-template-columns:1fr 1fr}} .yard{{height:calc(100dvh - 320px)!important}} .jobs .list{{max-height:calc(100dvh - 380px)}} .podcard{{height:196px}} .vv[data-vv=apps] .jobs .list{{max-height:calc(100dvh - 590px)}}
+.row.ur{{grid-template-columns:minmax(0,11rem) 1fr 5.4rem}} .row.ur em{{white-space:nowrap}}
+.whogrid>div:last-child,.whogrid .vv:not([hidden]){{display:flex;flex-direction:column}} .whogrid .vv:not([hidden]){{flex:1}} .whogrid .mbox:not([hidden]){{flex:1}}
 .usebar{{display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between}} .usebar .jtabs{{margin-bottom:10px}}
 #p-rec .hero{{gap:4px 18px;grid-template-columns:auto minmax(0,1fr) minmax(0,1.25fr)}} #p-rec .lesson{{flex-wrap:wrap;font-size:15px;line-height:1.45;padding:12px 16px}} #p-rec .lesson .ctl{{width:100%;justify-content:flex-end;margin-top:6px}} #p-rec .hero .buddy-wrap{{grid-row:1/span 3}} #p-rec .hero #lesson{{grid-column:3;grid-row:1/span 3;align-self:center;margin:0}} #p-rec .hero h1{{font-size:clamp(1.5rem,2.6vw,2.4rem)}}
 .recgrid{{display:grid;grid-template-columns:3fr 2fr;gap:12px;align-items:start}} .recl,.recr{{display:flex;flex-direction:column;gap:12px;min-width:0}}
@@ -1187,6 +1189,7 @@ details.storagebox{{font-size:13px}} details.storagebox>.c{{border:0;padding:8px
 <div class=en style="--n:1"><!--YARD--><script type=application/json id=podium-data>{podium_json}</script></div>
 <div class=en style="--n:2"><div class=usebar><div class="jtabs vtabs" role=group aria-label="Show"><button type=button class="jt vt" data-vv=apps aria-pressed=true>Apps</button><button type=button class="jt vt" data-vv=claude aria-pressed=false>Claude&#x27;s tools</button></div>{mtabs("uses", m_first)}</div>
 <div class=vv data-vv=apps>
+<div class="c podcard" id=podium-host aria-label="The three apps using the most processors and the most memory"></div>
 {f"""<div class="c jobs mbox" data-m=cpu{"" if m_first == "cpu" else " hidden"}><div class=jtabs role=group aria-label="Time window">{cuses_tabs}</div>{cuses_views}
 <p class=note style="margin-top:10px">Each app&#x27;s share of all {cores_n} cores. Tap a Claude row to see its groups and scripts.</p></div>""" if capps else ""}
 <div class="c jobs mbox" data-m=mem{"" if m_first == "mem" else " hidden"}><div class=jtabs role=group aria-label="Time window">{uses_tabs}</div>{uses_views}
@@ -1292,9 +1295,10 @@ details.storagebox{{font-size:13px}} details.storagebox>.c{{border:0;padding:8px
   document.querySelectorAll(".mt").forEach(b => b.addEventListener("click", () => {{ setM(b.dataset.m); try {{ localStorage.setItem("mm-measure", b.dataset.m); }} catch (_) {{}} }}));
   try {{ const mm = localStorage.getItem("mm-measure"); if (mm) setM(mm); }} catch (_) {{}}
   document.querySelectorAll(".jobs .jt").forEach(b => b.addEventListener("click", () => {{
-    const box = b.closest(".jobs"), key = "mm-win-" + b.closest(".panel").id;
-    box.querySelectorAll(".jt").forEach(x => x.setAttribute("aria-pressed", x === b));
-    box.querySelectorAll(".jv").forEach(v => v.hidden = v.dataset.v !== b.dataset.v);
+    const panel = b.closest(".panel"), key = "mm-win-" + panel.id, w = b.dataset.v;
+    panel.querySelectorAll(".jobs").forEach(box => {{ if (!box.querySelector(`.jt[data-v="${{w}}"]`)) return;
+      box.querySelectorAll(".jt").forEach(x => x.setAttribute("aria-pressed", x.dataset.v === w));
+      box.querySelectorAll(".jv").forEach(v => v.hidden = v.dataset.v !== w); }});
     try {{ localStorage.setItem(key, b.dataset.v); }} catch (_) {{}}
   }}));
   document.querySelectorAll(".jobs").forEach(box => {{ try {{ const jv = localStorage.getItem("mm-win-" + box.closest(".panel").id);

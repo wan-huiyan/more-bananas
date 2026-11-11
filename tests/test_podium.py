@@ -33,6 +33,7 @@ def podium_for(apps, cpu_apps=None):
                       mood='calm', tone='#34d399', fav='', by_group={}, now_d={}, cores=10,
                       load1=4, swapped_total_gb=0, comp_gb=2, wired_gb=3, squeezed_gb=4, hours='all')
         page = report.render(values)
+    assert 'id=podium-host' in page, 'the podium card is missing from the page'
     found = re.search(r'<script type=application/json id=podium-data>(.*?)</script>', page)
     return json.loads(found.group(1))
 

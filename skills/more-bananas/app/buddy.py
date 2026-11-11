@@ -182,8 +182,10 @@ YARD_CSS = """
  .mini.walk .leg-b{animation:step .32s ease-in-out infinite alternate-reverse}
  .mini.walk .body{animation:waddle .32s ease-in-out infinite alternate}
 }
-.podiums{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:space-evenly;align-items:flex-end;gap:10px;padding:0 18px;pointer-events:none;z-index:1}
-.pod{margin:0;flex:1 1 0;min-width:0;max-width:310px;pointer-events:auto}
+.podcard{padding:12px 16px 0!important;margin-bottom:12px;overflow:hidden}
+.podiums{display:flex;justify-content:space-evenly;align-items:flex-end;gap:24px;height:100%}
+.pod{margin:0;flex:1 1 0;min-width:0;max-width:330px}
+.steps{border-bottom:3px solid var(--line)}
 .pod figcaption{font-size:12px;color:var(--mute);text-align:center;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pod figcaption b{font:600 15px Fredoka,sans-serif;color:var(--fg)}
 .steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end}
@@ -199,7 +201,7 @@ YARD_CSS = """
 .step.s3{--mc:#e8b07a} .step.s3 .blk{height:44px;border-top-left-radius:0} .step.s3 .medal{background:#e8b07a}
 .blk b{font:600 12.5px/1.15 Fredoka,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .blk em{font:500 11px/1.1 ui-monospace,monospace;font-style:normal;opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-@media(max-width:560px){#yard{height:640px!important}.podiums{flex-direction:column;align-items:center;gap:6px}.pod{flex:none;width:100%}.blk b{font-size:11px}.blk em{font-size:9.5px}.pod figcaption{font-size:10.5px}.pod figcaption b{font-size:13px}}
+@media(max-width:560px){.podiums{flex-direction:column;align-items:center;gap:10px;padding-bottom:4px}.pod{flex:none;width:100%}.blk b{font-size:11px}.blk em{font-size:9.5px}.pod figcaption{font-size:10.5px}.pod figcaption b{font-size:13px}}
 @keyframes step{from{transform:translateY(-3px)}to{transform:translateY(1px)}}
 @keyframes waddle{from{transform:rotate(-3deg)}to{transform:rotate(3deg)}}
 """
@@ -272,14 +274,16 @@ YARD_JS = """<script>
     }).join("");
   };
   const winNow = () => { try { return localStorage.getItem("mm-win-p-uses") || "now"; } catch (_) { return "now"; } };
-  if (pod) {
-    yard.appendChild(stage); drawPodium(winNow());
+  const host = document.getElementById("podium-host");
+  if (host && !pod) host.hidden = true;
+  if (pod && host) {
+    host.appendChild(stage); drawPodium(winNow());
     const panel = yard.closest(".panel");
     if (panel) panel.addEventListener("click", ev => { const b = ev.target.closest(".jobs .jt"); if (b && b.dataset.v) drawPodium(b.dataset.v); });
   }
   if (!crowd.length) return;
   const W = () => yard.clientWidth, H = () => yard.clientHeight;
-  const floor = () => H() - (stage.isConnected ? stage.offsetHeight : 0);   // wanderers stay above the podium
+  const floor = () => H() - (yard.contains(stage) ? stage.offsetHeight : 0);   // wanderers stay above anything standing in the yard
   // Buddies shrink a little when the podium leaves them less room (a short laptop screen), so they do not pile up.
   const bw = c => (34 + 54 * Math.sqrt(size(c) / max)) * Math.min(1, Math.max(.6, floor() / 380));
   const inner = (c, i) => svg(c, i) + `<span class="tag">${c.name.length > 16 ? c.name.slice(0, 15) + "…" : c.name}</span>`
