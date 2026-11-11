@@ -1306,23 +1306,32 @@ details.storagebox{{font-size:13px}} details.storagebox>.c{{border:0;padding:8px
   // only at its top or bottom edge does the next screen come in. One move per gesture, no wrap-around.
   const go = d => {{ const j = cur + d; if (j >= 0 && j < ids.length) show(j, true); }};
   let lock = 0, acc = 0, accT = 0;
-  const atEdge = (d) => {{ const p = document.querySelectorAll(".panel")[cur];
+  // A list that scrolls inside the screen (the app list, Claude's tools) is scrolled first, under the pointer or finger.
+  const innerCanScroll = (el, d) => {{
+    for (; el && el !== document.body && !el.classList.contains("panel"); el = el.parentElement) {{
+      if (el.scrollHeight - el.clientHeight > 2 && /auto|scroll/.test(getComputedStyle(el).overflowY)
+          && (d > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 2 : el.scrollTop > 0)) return true;
+    }}
+    return false;
+  }};
+  const atEdge = (d, target) => {{ const p = document.querySelectorAll(".panel")[cur];
+    if (target && innerCanScroll(target, d)) return false;
     if (p.scrollHeight - p.clientHeight <= 24) return true;  // a few pixels over is not worth scrolling: it only jiggles
     return d > 0 ? p.scrollTop + p.clientHeight >= p.scrollHeight - 2 : p.scrollTop <= 0; }};
   addEventListener("wheel", e => {{
     if (e.ctrlKey || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
     const d = Math.sign(e.deltaY), now = performance.now();
-    if (!atEdge(d)) {{ acc = 0; return; }}
+    if (!atEdge(d, e.target)) {{ acc = 0; lock = Math.max(lock, now + 400); return; }}
     e.preventDefault();
     if (now < lock) {{ lock = now + 260; return; }}  // swallow the tail of a trackpad fling
     if (now - accT > 300) acc = 0; accT = now; acc += e.deltaY;
     if (Math.abs(acc) > 70) {{ acc = 0; lock = now + 950; go(d); }}
   }}, {{ passive: false }});
-  let ty = null;
-  addEventListener("touchstart", e => {{ ty = e.touches[0].clientY; }}, {{ passive: true }});
+  let ty = null, tt = null, tInner = false;
+  addEventListener("touchstart", e => {{ ty = e.touches[0].clientY; tt = e.target; tInner = innerCanScroll(tt, 1) || innerCanScroll(tt, -1); }}, {{ passive: true }});
   addEventListener("touchend", e => {{
     if (ty === null) return; const dy = ty - e.changedTouches[0].clientY; ty = null;
-    if (Math.abs(dy) > 60 && atEdge(Math.sign(dy))) go(Math.sign(dy));
+    if (Math.abs(dy) > 60 && !tInner && atEdge(Math.sign(dy))) go(Math.sign(dy));
   }}, {{ passive: true }});
   addEventListener("keydown", e => {{
     if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(e.key)) {{ e.preventDefault(); go(1); }}
