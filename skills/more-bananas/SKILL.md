@@ -11,7 +11,7 @@ measurements: does this Mac have enough memory for the owner's real workload, an
 
 Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the page, settings).
 
-## What the page shows (six screens, each fitting one laptop screen, answer first; scroll or swipe between them)
+## What the page shows (six screens, each fitting one laptop screen, answer first; scroll or swipe between them, and a long list inside a screen scrolls first)
 
 1. **What to buy**: the processor, RAM and storage to buy. RAM = highest memory need ever recorded × 1.25, rounded up
    to a size Macs are sold in (16/24/32/36/48/64/96/128 GB); a budget pick = smallest size that covered 99%

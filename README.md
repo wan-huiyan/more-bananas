@@ -52,7 +52,7 @@ This measures instead. It reads macOS's own memory figures once a minute, keeps 
 <table>
 <tr>
 <td width="50%" valign="top">
-<img src="docs/demo/yard.gif" alt="Banana buddies walking around a yard, one per app and per Claude Code session, sized by memory"/>
+<img src="docs/demo/yard.gif" alt="Banana buddies walking around a yard, one per app, per kind of Claude tool (green suits) and per Claude Code session, sized by memory"/>
 <br/><b>🧸 Who is in your RAM right now.</b> One buddy per app, per kind of Claude or Codex tool and per Claude Code session, refreshed every minute. Bigger buddy, more memory; two goggles means over 1 GB. Click one to ask what it is.
 </td>
 <td width="50%" valign="top">
@@ -138,7 +138,7 @@ Re-running `install.sh` upgrades the code and keeps your readings and settings. 
 ## Using it
 
 - **Open it:** click the Dock buddy, or open `~/Desktop/memory-report.html`. It refreshes itself every minute.
-- **Move around:** the tab bar, the scroll wheel, a swipe, or the arrow keys. One tab per screen, no long scroll.
+- **Move around:** the tab bar, the scroll wheel, a swipe, or the arrow keys. One tab per screen, no long scroll. A long list inside a tab scrolls first; once it reaches the end, scroll again to change tab.
 - **Ask Claude:** *"how much RAM should my next Mac have?"*, *"why is my Mac slow this afternoon?"*, *"what is Claude running that uses so much memory?"* Claude reads the same files in `~/memlog/`.
 
 ## Limitations (read these before you buy anything)
