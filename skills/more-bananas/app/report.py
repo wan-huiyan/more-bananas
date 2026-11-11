@@ -301,10 +301,11 @@ def render(v):
                         acc[g_] = acc.get(g_, 0) + x
             if k_:
                 capg[str(i)] = sorted(((g_, round(x / k_, 1)) for g_, x in acc.items()), key=lambda kv: -kv[1])[:3]
+        wpoly = "".join('<polyline class=wline points="' + " ".join(f"{X(i):.1f},{max(Y(x * TOTAL), 2):.1f}" for i, x in run_) + '"/>' for run_ in cruns)
         cdata = json.dumps({"t": T, "w": [None if x is None else round(x, 2) for x in wv], "apps": capg, "b": b, "ml": ml,
                             "top": ctop, "ch": CH_, "cores": cores_n}).replace("</", "<\\/")
         mdata = json.dumps({"t": T, "need": [round(x, 2) for x in need], "ram": [round(x, 2) for x in U], "b": b, "pk": pk, "top": round(top, 3),
-                            "swap": [round(x) if x is not None else None for x in gswap], "missing": gmissing, "cause": tc, "cn": CAUSE_NAMES}).replace("</", "<\\/")
+                            "swap": [round(x) if x is not None else None for x in gswap], "missing": gmissing, "cause": tc, "cn": CAUSE_NAMES, "w": [None if x is None else round(x, 2) for x in wv]}).replace("</", "<\\/")
         peak_d = v["apps"].get(peak_t, {})
         since_ = mstamp(T_all[ix_[0]]) > mstamp(T_all[-1]) - 1440 * r + 30 and r > 1
         h2 = (f"Processors held it up <em class=nw>{span(cpu_held)}</em> {when}" if cpu_first and cpu_held else
@@ -312,21 +313,9 @@ def render(v):
               f"{when[0].upper() + when[1:]} it has <em>fitted</em>{' so far' if when == 'today' else ''}")
         return f"""<div class=rv data-r={r}{"" if r == 1 else " hidden"}>
 <div class=en><h2 class=big>{h2}</h2>{f'<p class=note style="margin:8px 0 14px">Measured since {e(lab(T_all[ix_[0]]))}; the monitor has not run longer than that yet.</p>' if since_ else ""}</div>
-<p class="lede en" style="--n:1">{"Two things can hold it up, and the one that held it up more comes first. " if has_w else ""}{"The purple line is work waiting for the processors: above its dotted line there was more work than its " + str(cores_n) + " cores could run. " if has_w else ""}The red line is everything held in memory: above the dotted {TOTAL:.0f} GB line it no longer fits, so the striped part sits on the disk, and the drops are the minutes it was moving memory out. {f"Each point is the busiest minute of {b}. " if b > 1 else ""}Hover to read any {"minute" if b == 1 else "point"}.</p>
+<p class="lede en" style="--n:1">{"Two things can hold it up, and the one that held it up more comes first. " if has_w else ""}{"The purple line is work waiting for the processors, drawn so the dotted line also means 1&times;: above it there was more work than its " + str(cores_n) + " cores could run. " if has_w else ""}The red line is everything held in memory: above the dotted {TOTAL:.0f} GB line it no longer fits, so the striped part sits on the disk, and the drops are the minutes it was moving memory out. {f"Each point is the busiest minute of {b}. " if b > 1 else ""}Hover to read any {"minute" if b == 1 else "point"}.</p>
 <div class="todays{" cpufirst" if cpu_first else ""}">
-{f"""<div class="two tcpu">
-<div class="c chartbox en cchart" style="--n:2">
-<small>Processors: work waiting, as &times; its {cores_n} cores</small>
-<svg class=ws viewBox="0 -14 {W} {CH_ + 52}" role=img aria-label="Work waiting for the processors per minute, against the {cores_n} cores this Mac has">
-<clipPath id=wabove{sfx}><rect x=0 y=-20 width={W} height={CY(1) + 20:.1f} /></clipPath>
-<rect class=czb x=0 y=10 width={W} height={CH_} rx=8 />{cpoly}
-<line class=ceil x1=0 x2={W} y1={CY(1):.1f} y2={CY(1):.1f} /><text x={W} y=2 class=tk text-anchor=end>dotted line: 1&times;, more work than its {cores_n} cores can run</text>
-{f'<text x="{X(cruns[0][0][0]) - 6:.1f}" y="{CH_ + 2}" class=tk text-anchor=end>measured from {e(lab(T[cruns[0][0][0]]))}</text>' if cruns and cruns[0][0][0] > 30 else ""}
-{ticks.replace(f'y="{H + 20}"', f'y="{CH_ + 32}"')}
-<line class=xh x1=0 x2=0 y1=10 y2={10 + CH_} /></svg>
-<div class=tip></div>
-<script type=application/json class=cdata>{cdata}</script>
-</div>
+{f"""<div class="tcpu">
 <div class="c en" style="--n:3"><small>Who kept the processors busy {when}{f", worst at {e(lab(worst_w[1]))} ({worst_w[0]:.1f}&times;)" if worst_w[1] is not None else ""}</small><div class=list>{cwho}</div></div>
 </div>""" if has_w else ""}
 <div class="two tmem">
@@ -339,6 +328,7 @@ def render(v):
 <text x=8 y={ram_y + 20:.1f} class=tk>{TOTAL:.0f} GB: all the memory this Mac has</text>
 <polyline class=ram pathLength=1 points="{upts}"/>
 <polyline class=need pathLength=1 points="{pts}"/>
+{wpoly}
 <g transform="translate({px:.1f} {py:.1f})"><line x1=0 y1=0 x2=0 y2=-46 stroke="var(--fg)" stroke-width=2 />
 <path class=flagb d="M0 -46 h{-74 if flag_left else 74} v22 h{74 if flag_left else -74}z" fill="var(--hot)"/>
 <text x="{-37 if flag_left else 37}" y=-30 text-anchor=middle fill="#fff" font-family="Fredoka,sans-serif" font-weight=700 font-size=14>{gb(peak)} GB</text>
@@ -357,7 +347,7 @@ def render(v):
 </div>
 <div class="c en" style="--n:3"><small>What held the memory at {"today&#x27;s busiest minute" if when == "today" else "the busiest minute " + when}, {e(peak_when)}</small><div class=list>{bars(peak_d, peak_t)}</div></div>
 </div>
-<div class="legend en" style="--n:4"><span><i style="background:var(--hot)"></i>memory needed (in RAM + parked on disk)</span><span><i style="background:var(--ram)"></i>in RAM</span><span><i style="background:repeating-linear-gradient(45deg,var(--hot) 0 2px,transparent 2px 5px)"></i>overflow onto disk</span><span>{swap_mins} minutes swapping, {heavy_mins} of them heavy</span></div>
+<div class="legend en" style="--n:4"><span><i style="background:var(--hot)"></i>memory needed (in RAM + parked on disk)</span><span><i style="background:var(--ram)"></i>in RAM</span><span><i style="background:repeating-linear-gradient(45deg,var(--hot) 0 2px,transparent 2px 5px)"></i>overflow onto disk</span>{'<span><i style="background:var(--c-cpu)"></i>work waiting for the processors (dotted line = 1&times; its cores)</span>' if has_w else ""}<span>{swap_mins} minutes swapping, {heavy_mins} of them heavy</span></div>
 <div class="legend en" style="--n:5">{CAUSE_KEY}</div>
 </div></div>"""
 
@@ -975,8 +965,9 @@ svg.ts{{width:100%;height:auto;display:block;overflow:visible;touch-action:pan-y
 .vbar i{{display:block;height:100%}} .vkey b{{color:var(--fg)}}
 .ladders{{display:flex;flex-direction:column;gap:18px}}
 h2 .nw{{white-space:nowrap}}
-.todays{{display:flex;flex-direction:column;gap:14px}} .todays.cpufirst .tcpu{{order:-1}}
+.todays{{display:flex;flex-direction:column;gap:14px}} .todays .tcpu{{order:1}}
 .ws{{width:100%;height:auto;display:block;overflow:visible;margin-top:6px}}
+.ts .wline{{fill:none;stroke:var(--c-cpu);stroke-width:2;stroke-linejoin:round;opacity:.85}}
 .ws .wa{{fill:color-mix(in srgb,var(--c-cpu) 14%,transparent)}} .ws .wl{{fill:none;stroke:var(--c-cpu);stroke-width:2;stroke-linejoin:round}}
 .ws .wah{{fill:color-mix(in srgb,var(--c-cpu) 40%,transparent)}} .ws .wlh{{fill:none;stroke:var(--c-cpu);stroke-width:3;stroke-linejoin:round}}
 .ws .ceil{{stroke:var(--fg);stroke-width:2;stroke-dasharray:2 8;stroke-linecap:round;opacity:.7}}
@@ -1287,7 +1278,7 @@ details ul{{position:absolute;bottom:28px;left:0;width:min(560px,90vw);padding:1
       tip.style.left = (r.left - b.left + (X(i) - vb.x) * r.width / vb.width) + "px";
       tip.style.top = (r.top - b.top + (Y(D.need[i]) - vb.y - 40) * r.height / vb.height) + "px";
       const one = D.b === 1, span = one ? "this minute" : `these ${{D.b}} minutes`;
-      tip.innerHTML = `<b>${{D.t[i].slice(5).replace("-", "/")}}${{one ? "" : ", busiest of " + D.b + " min"}}</b><br><i style="background:var(--hot)"></i>observed RAM + swap ${{D.need[i].toFixed(1)}} GB<br><i style="background:var(--ram)"></i>in RAM ${{D.ram[i].toFixed(1)}} GB<br>${{D.swap[i] === null ? "swap rate unavailable" : D.swap[i] ? D.swap[i] + " MB pushed to disk" + (one ? "" : " observed maximum") : "no swap-out observed " + span}}${{D.missing[i] && D.swap[i] !== null ? " (some intervals unavailable)" : ""}}<br>${{D.cause[i] ? `<i class="cz ${{D.cause[i]}}"></i>pressure signal: ${{D.cn[D.cause[i]]}}` : D.missing[i] ? "not fully measured" : "no pressure signal observed"}}`;
+      tip.innerHTML = `<b>${{D.t[i].slice(5).replace("-", "/")}}${{one ? "" : ", busiest of " + D.b + " min"}}</b><br><i style="background:var(--hot)"></i>observed RAM + swap ${{D.need[i].toFixed(1)}} GB<br><i style="background:var(--ram)"></i>in RAM ${{D.ram[i].toFixed(1)}} GB<br>${{D.swap[i] === null ? "swap rate unavailable" : D.swap[i] ? D.swap[i] + " MB pushed to disk" + (one ? "" : " observed maximum") : "no swap-out observed " + span}}${{D.missing[i] && D.swap[i] !== null ? " (some intervals unavailable)" : ""}}<br>${{D.cause[i] ? `<i class="cz ${{D.cause[i]}}"></i>pressure signal: ${{D.cn[D.cause[i]]}}` : D.missing[i] ? "not fully measured" : "no pressure signal observed"}}${{D.w && D.w[i] != null ? `<br><i style="background:var(--c-cpu)"></i>work waiting ${{D.w[i].toFixed(1)}}&times; its cores` : ""}}`;
     }};
     const pick = ev => {{
       const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;

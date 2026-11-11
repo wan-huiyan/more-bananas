@@ -28,9 +28,10 @@ Nothing is sent anywhere. Everything lives in `~/memlog/` (readings as CSV, the 
    buttons; a click, scroll or swipe outside the bubble stops it and puts the page back, and it only
    scrolls the page when you press its own buttons. The page refreshes itself once a minute, but waits while you
    are using it and keeps your place, without replaying the entrance animation.
-2. **Today**: two charts, the cause that held the Mac up more first: work waiting for the processors
-   against the core count (with who kept them busy), and memory need against the RAM line (the minutes it was
-   actively swapping, and what held memory at today's busiest minute). Buttons switch to the last 3, 7 or 30
+2. **Today**: one chart: memory need against the RAM line, with work waiting for the processors drawn on it
+   so the same dotted line means "full" for both (1&times; the cores), the minutes it was actively swapping, and
+   what held it up minute by minute; beside it what held memory at the busiest minute, and below it who kept
+   the processors busy. Buttons switch to the last 3, 7 or 30
    days; longer ranges plot the busiest minute of each 5 to 60, while the headline still counts real minutes.
 3. **Hot & slow**: everything that makes the Mac hot, loud or slow, minute by minute, today or the last 3, 7 or 30 days
    (the same switch as Today): chip
