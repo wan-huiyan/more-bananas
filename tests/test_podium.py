@@ -14,8 +14,8 @@ sys.path.insert(0, str(APP))
 import report
 
 
-def podium_for(apps, cpu_apps=None, tools=None):
-    """Render the page from per-app memory (and optionally processor) readings, and return its podium data."""
+def page_for(apps, cpu_apps=None, tools=None):
+    """Render the page from per-app memory (and optionally processor and Claude tool) readings."""
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         (root / 'icon').mkdir()
@@ -34,7 +34,12 @@ def podium_for(apps, cpu_apps=None, tools=None):
         values.update(HOME=directory, stamp=times[-1], TOTAL_GB=24, out_mb=0, cfg={}, terms=1,
                       mood='calm', tone='#34d399', fav='', by_group={}, now_d={}, cores=10,
                       load1=4, swapped_total_gb=0, comp_gb=2, wired_gb=3, squeezed_gb=4, hours='all')
-        page = report.render(values)
+        return report.render(values)
+
+
+def podium_for(apps, cpu_apps=None, tools=None):
+    """The page's podium data."""
+    page = page_for(apps, cpu_apps, tools)
     assert 'id=podium-host' in page, 'the podium card is missing from the page'
     found = re.search(r'<script type=application/json id=podium-data>(.*?)</script>', page)
     return json.loads(found.group(1))
@@ -72,6 +77,17 @@ class PodiumTests(unittest.TestCase):
     def test_without_a_tool_log_the_lumped_rows_still_place_under_claudes_name(self):
         pod = podium_for({'Browsers Claude drives': 2.9, 'Tools Claude starts': 1.0, 'macOS system': 0.4})
         self.assertEqual([g for g, _ in pod['wins']['now']['mem']], ["Claude's test browsers", "Claude's other tools", 'macOS system'])
+
+
+    def test_the_list_shows_claudes_tools_by_kind_not_lumped(self):
+        page = page_for({'Browsers Claude drives': 2.9, 'Tools Claude starts': 1.0, 'macOS system': 2.4},
+                        tools={'Chrome opened by check_dashboard.py': 2.0, 'build_page.py': 0.4, 'check_dashboard.py': 0.1})
+        rows = re.findall(r'<div class="row ur"[^>]*><span>([^<]+)</span>', page)
+        self.assertIn('Claude&#x27;s test browsers', rows)
+        self.assertIn('Claude&#x27;s build scripts', rows)
+        self.assertNotIn('Browsers Claude drives', rows)
+        self.assertNotIn('Tools Claude starts', rows)
+        self.assertIn('build_page.py', page)        # each kind opens into its scripts
 
 
 if __name__ == '__main__':

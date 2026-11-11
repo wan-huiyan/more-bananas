@@ -793,8 +793,14 @@ def render(v):
 
     # ---------- What uses memory: app groups over a time window, Claude's work opened up ----------
     a_last = max(apps_all) if apps_all else ""
+    avg_c = {}
     def use_avg(hours, src):
         """Each app group's average and busiest minute over the last `hours` (0 = the latest reading)."""
+        if (id(src), hours) in avg_c:     # the list and the podium ask for the same windows
+            return avg_c[(id(src), hours)]
+        avg_c[(id(src), hours)] = r_ = _use_avg(hours, src)
+        return r_
+    def _use_avg(hours, src):
         last = max(src) if src else ""
         if not last:
             return {}, {}, []
@@ -808,7 +814,48 @@ def render(v):
             for g, x in src[t].items():
                 tot[g] = tot.get(g, 0) + x; top_[g] = max(top_.get(g, 0), x)
         return {g: x / len(mins) for g, x in tot.items()}, top_, mins
-    def uses_view(hours, src, tsrc, cpu):
+    # Claude's tools as their own rows: the log of app groups lumps them into "Browsers Claude drives" and "Tools Claude
+    # starts". Minute by minute, each lumped row is split by the kinds' shares in Claude's own tool log (and its scripts
+    # scaled by the same factor), so the rows still add up to what the group measured. A minute with no tool log keeps
+    # the lumped amount under one Claude name. Codex's tools get a plain name.
+    POD_KIND = {KINDS[0][0]: "Claude's test browsers", KINDS[1][0]: "Claude's plug-ins", KINDS[2][0]: "Claude's page checks",
+                KINDS[3][0]: "Claude's cloud tools", KINDS[4][0]: "Claude's build scripts", KINDS[5][0]: "Claude's shell"}
+    KIND_OF = {v_: k_ for k_, v_ in POD_KIND.items()}
+    LUMPS = ((BR, {KINDS[0][0]}, "Claude's test browsers"), ("Tools Claude starts", {k_ for k_, _ in KINDS[1:]}, "Claude's other tools"))
+    RENAME = {"Tools started by Codex": "Codex's tools"}
+    kind_c, label_c = {}, {}
+    def label_of(jb):
+        if jb not in label_c:
+            label_c[jb] = label(jb)
+        return label_c[jb]
+    def kind_of(jb):
+        if jb not in kind_c:
+            kind_c[jb] = kind(jb)
+        return kind_c[jb]
+    def split_tools(src, tsrc):
+        out, scale = {}, {}
+        for t, d_ in src.items():
+            row = {RENAME.get(g, g): x for g, x in d_.items() if g not in (BR, "Tools Claude starts")}
+            tt = tsrc.get(t, {})
+            for g, names, fallback in LUMPS:
+                if g not in d_:
+                    continue
+                parts = {}
+                for (se, jb), x in tt.items():
+                    k_ = kind_of(jb)
+                    if k_ in names:
+                        parts[k_] = parts.get(k_, 0) + x
+                tot = sum(parts.values())
+                if tot <= 0:
+                    row[fallback] = row.get(fallback, 0) + d_[g]
+                    continue
+                f_ = d_[g] / tot
+                scale.setdefault(t, {})[g] = f_
+                for k_, x in parts.items():
+                    row[POD_KIND[k_]] = row.get(POD_KIND[k_], 0) + x * f_
+            out[t] = row
+        return out, scale
+    def uses_view(hours, src, tsrc, scale, cpu):
         fmt = (lambda x: f"{x:.0f}%") if cpu else (lambda x: f"{x:.1f} GB")
         avg, top_, mins = use_avg(hours, src)
         if not mins:
@@ -823,64 +870,46 @@ def render(v):
             val = fmt(x) if hours == 0 else (f"{x:.0f} &middot; {top_[g]:.0f}" if cpu else f"{x:.1f} &middot; {top_[g]:.1f}")
             row = f'<div class="row ur" style="--i:{j}" title="{e(g)}"><span>{e(g)}</span><div class=track><b style="--w:{x/sc*100:.0f}%"></b></div><em>{val}</em></div>'
             sub = ""
-            if g in ("Tools Claude starts", BR) and tmins:
-                ks = {}
+            if g in KIND_OF and tmins:   # a kind of Claude tool: its busiest scripts, with the session folder that started each
+                k0 = KIND_OF[g]; grp = BR if k0 == KINDS[0][0] else "Tools Claude starts"
+                jobs_ = {}
                 for t in tmins:
+                    f_ = scale.get(t, {}).get(grp)
+                    if f_ is None:
+                        continue
                     for (se, jb), g_ in tsrc[t].items():
-                        k_ = kind(jb)
-                        if (k_ == KINDS[0][0]) != (g == BR):
-                            continue
-                        ks.setdefault(k_, {}); ks[k_][(se, label(jb))] = ks[k_].get((se, label(jb)), 0) + g_ / len(tmins)
-                for k_, jobs_ in sorted(ks.items(), key=lambda kv: -sum(kv[1].values())):
-                    topj = sorted(jobs_.items(), key=lambda kv: -kv[1])[:5]
-                    sub += (f'<p class=kd><b>{e(k_)}</b> &middot; {fmt(sum(jobs_.values()))}{"" if hours == 0 else " on average"}. {e(desc[k_])}</p><ul class=jl>'
-                            + "".join(f'<li><span><b>{e(jb_)}</b> <i>{e(se)}</i></span><em>{fmt(g_)}</em></li>' for (se, jb_), g_ in topj) + "</ul>")
+                        if kind_of(jb) == k0:
+                            k_ = (se, label_of(jb)); jobs_[k_] = jobs_.get(k_, 0) + g_ * f_ / len(mins)
+                topj = [(k_, v_) for k_, v_ in sorted(jobs_.items(), key=lambda kv: -kv[1])[:5] if v_ >= (.05 if cpu else .005)]
+                if topj:
+                    sub = (f'<p class=kd>{e(desc[k0])}</p><ul class=jl>'
+                           + "".join(f'<li><span><b>{e(jb_)}</b> <i>{e(se)}</i></span><em>{fmt(g_)}</em></li>' for (se, jb_), g_ in topj) + "</ul>")
             out += f'<details class=kind><summary>{row}</summary>{sub}</details>' if sub else row
         return out, len(mins)
     def uses_block(src, tsrc, cpu):
+        ssrc, scale = split_tools(src, tsrc)
         uviews = []
         for vid, vname, hours in (("now", "Now", 0), ("d1", "24 hours", 24), ("d7", "7 days", 168), ("d30", "30 days", 720)):
-            body, nmin = uses_view(hours, src, tsrc, cpu)
+            body, nmin = uses_view(hours, ssrc, tsrc, scale, cpu)
             short_ = "" if hours == 0 or nmin >= hours * 60 * .9 else f'<p class=kd>Only {nmin / 60:.0f} hours recorded in this window so far.</p>'
-            head_ = '<p class=uh><span>App</span><span>' + (("share of all cores now" if cpu else "memory now") if hours == 0 else
+            head_ = '<p class=uh><span>App or tool</span><span>' + (("share of all cores now" if cpu else "memory now") if hours == 0 else
                                                            ("average &middot; busiest minute, % of all cores" if cpu else "average &middot; busiest minute, GB")) + '</span></p>'
             uviews.append((vid, vname, short_ + head_ + body))
         tabs_ = "".join(f'<button type=button class=jt data-v={vid} aria-pressed={"true" if j == 0 else "false"}>{vn}</button>' for j, (vid, vn, _) in enumerate(uviews))
         views_ = "".join(f'<div class=jv data-v={vid}{"" if j == 0 else " hidden"}><div class=list>{b_}</div></div>' for j, (vid, _, b_) in enumerate(uviews))
-        return tabs_, views_
-    uses_tabs, uses_views = uses_block(apps_all, tj, False)
-    cuses_tabs, cuses_views = uses_block(capps, tjc, True)
+        return tabs_, views_, ssrc
+    uses_tabs, uses_views, apps_split = uses_block(apps_all, tj, False)
+    cuses_tabs, cuses_views, capps_split = uses_block(capps, tjc, True)
     # The processors view comes first wherever the processors held the Mac up more.
     m_first = "cpu" if cpu_first and capps else "mem"
-    # The podium: the three app groups with the highest average, per time window, ranked exactly as the list beside it
-    # (same rows, same cut-offs), leaving out the catch-all "Other apps" and the old Chrome + test browsers mix.
-    # Apps and the coding agents' tools compete on one podium: the two lumped Claude rows ("Tools Claude starts",
-    # "Browsers Claude drives") are replaced by each kind of tool on its own. Each lumped row keeps the list's total and
-    # is split by the kinds' shares in Claude's own tool log, so the podium and the list never disagree.
-    POD_KIND = {KINDS[0][0]: "Claude's test browsers", KINDS[1][0]: "Claude's plug-ins", KINDS[2][0]: "Claude's page checks",
-                KINDS[3][0]: "Claude's cloud tools", KINDS[4][0]: "Claude's build scripts", KINDS[5][0]: "Claude's shell"}
-    POD_NAME = {"Tools started by Codex": "Codex's tools"}
-    def podium_top(hours, src, tsrc, cpu):
-        avg, _, mins = use_avg(hours, src)
-        ent = {POD_NAME.get(g, g): x for g, x in avg.items() if g not in ("Other apps", "Tools Claude starts", BR) and "not split" not in g}
-        tmins = [t for t in mins if t in tsrc]
-        share = {}
-        for t in tmins:
-            for (se, jb), x in tsrc[t].items():
-                k_ = kind(jb); share[k_] = share.get(k_, 0) + x
-        for g, kinds_, fallback in ((BR, KINDS[:1], "Claude's test browsers"), ("Tools Claude starts", KINDS[1:], "Claude's other tools")):
-            tot_ = sum(share.get(k_, 0) for k_, _ in kinds_)
-            if g not in avg:
-                continue
-            if tot_ <= 0:
-                ent[fallback] = ent.get(fallback, 0) + avg[g]
-                continue
-            for k_, _ in kinds_:
-                if share.get(k_):
-                    ent[POD_KIND[k_]] = ent.get(POD_KIND[k_], 0) + avg[g] * share[k_] / tot_
-        keep = [(g, x) for g, x in sorted(ent.items(), key=lambda kv: -kv[1]) if x >= (.5 if cpu else .05)]
+    # The podium: the top three rows of the list beside it (same split rows, same window, same cut-offs), leaving out
+    # the catch-all "Other apps" and the old Chrome + test browsers mix.
+    def podium_top(hours, src, cpu):
+        avg = use_avg(hours, src)[0]
+        keep = [(g, x) for g, x in sorted(avg.items(), key=lambda kv: -kv[1])
+                if x >= (.5 if cpu else .05) and g != "Other apps" and "not split" not in g]
         return [[g, round(x, 0 if cpu else 1)] for g, x in keep[:3]]
-    podium_json = json.dumps({"first": m_first, "wins": {vid: {"mem": podium_top(h_, apps_all, tj, False), "cpu": podium_top(h_, capps, tjc, True) if capps else []}
+    podium_json = json.dumps({"first": m_first, "wins": {vid: {"mem": podium_top(h_, apps_split, False), "cpu": podium_top(h_, capps_split, True) if capps else []}
                                                          for vid, h_ in (("now", 0), ("d1", 24), ("d7", 168), ("d30", 720))}}).replace("</", "<\\/")
     m_first_c = "cpu" if m_first == "cpu" and len(tjc) >= 60 else "mem"
     v["yard_measure"] = m_first          # buddy.py sizes the yard's buddies by the same measure (memlog.py reads it back)
@@ -1212,9 +1241,9 @@ details.storagebox{{font-size:13px}} details.storagebox>.c{{border:0;padding:8px
 <div class="c podcard" id=podium-host aria-label="The three apps or coding-agent tools using the most of the processors or memory"></div>
 <div class=vv data-vv=apps>
 {f"""<div class="c jobs mbox" data-m=cpu{"" if m_first == "cpu" else " hidden"}><div class=jtabs role=group aria-label="Time window">{cuses_tabs}</div>{cuses_views}
-<p class=note style="margin-top:10px">Each app&#x27;s share of all {cores_n} cores. Tap a Claude row to see its groups and scripts.</p></div>""" if capps else ""}
+<p class=note style="margin-top:10px">Each app&#x27;s or tool&#x27;s share of all {cores_n} cores. Claude&#x27;s tools are split by kind; tap one to see its scripts.</p></div>""" if capps else ""}
 <div class="c jobs mbox" data-m=mem{"" if m_first == "mem" else " hidden"}><div class=jtabs role=group aria-label="Time window">{uses_tabs}</div>{uses_views}
-<p class=note style="margin-top:10px">Tap a Claude row to see its groups and the scripts in each, with the session folder that started them.{f" The hidden test browsers peaked at {br_peak:.1f} GB this week." if br_peak >= 1 else ""}</p></div>
+<p class=note style="margin-top:10px">Claude&#x27;s tools are split by kind; tap one to see its scripts and the session folder that started each.{f" The hidden test browsers peaked at {br_peak:.1f} GB this week." if br_peak >= 1 else ""}</p></div>
 </div><div class=vv data-vv=claude hidden>
 {f"""<div class="c jobs mbox" data-m=cpu{"" if m_first == "cpu" else " hidden"}><div class=jtabs role=group aria-label="Time window">{cjobs_tabs}</div>{cjobs_views}
 <p class=note style="margin-top:10px">Share of all {cores_n} cores. Tap a group to see its scripts and the Claude session folder that started each one. Tracked since {e(min(tjc) if tjc else "the next reading")}.</p></div>""" if capps else ""}
