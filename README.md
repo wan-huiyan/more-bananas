@@ -16,7 +16,7 @@
 > **A tiny background job records what your Mac is really holding every minute (every app, every Claude Code session, and the hidden browsers and scripts those sessions start) and turns it into a cute, self-updating page that tells you how much memory your next laptop needs.**
 
 <p align="center">
-  <img src="docs/demo/tour.gif" width="860" alt="Five tabs of the page: what to buy, memory and processors minute by minute, hot and slow, busy times, and what uses the Mac"/>
+  <img src="docs/demo/tour.gif" width="860" alt="A recording of the page in use: clicking through what to buy, memory and processors (hovering along the chart), hot and slow, busy times by day and by hour, and what uses the Mac, switching the podium between memory and processors"/>
   <br/><sub>Five of the six tabs, each fitting one laptop screen: what to buy, memory and processors minute by minute, hot and slow, busy times, and what uses the Mac. The first tab is the answer: on this 16 GB work laptop, 16 GB was enough in only 67% of minutes, the budget pick is 32 GB, and 48 GB covers the busiest minute (33.9 GB) with a quarter to spare. Real readings, project names replaced.</sub>
 </p>
 
