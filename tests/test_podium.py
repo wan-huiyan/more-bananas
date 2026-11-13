@@ -14,12 +14,13 @@ sys.path.insert(0, str(APP))
 import report
 
 
-def page_for(apps, cpu_apps=None, tools=None, keep=None):
+def page_for(apps, cpu_apps=None, tools=None, keep=None, icon=True):
     """Render the page from per-app memory (and optionally processor and Claude tool) readings."""
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         (root / 'icon').mkdir()
-        (root / 'icon/fav64.b64').write_text('AA==')
+        if icon:
+            (root / 'icon/fav64.b64').write_text('AA==')
         now = dt.datetime.now().replace(second=0, microsecond=0)
         times = [(now - dt.timedelta(minutes=59 - i)).strftime('%Y-%m-%d %H:%M') for i in range(60)]
         (root / 'mem.csv').write_text(''.join(f'{t},12,1,1,1,1\n' for t in times))

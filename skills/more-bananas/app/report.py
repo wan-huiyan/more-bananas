@@ -951,8 +951,14 @@ def render(v):
     tabs = [("rec", "What to buy"), ("today", "Memory & processors")] + ([("heat", "Hot & slow")] if heat_sec else []) + [("days", "Busy times"), ("uses", "What uses the Mac" if capps else "What uses memory"), ("how", "How this works")]
     tab_html = "".join(f'<button role=tab data-go="{k}" aria-controls="p-{k}">{t}</button>' for k, t in tabs)
 
-    with open(os.path.join(v['HOME'], 'icon', 'fav64.b64')) as source:
-        fav64 = source.read()
+    # The tab icon picture install.sh copies in; without it the page keeps the drawn icon below rather than failing.
+    try:
+        with open(os.path.join(v['HOME'], 'icon', 'fav64.b64')) as source:
+            fav64 = source.read().strip()
+    except OSError:
+        fav64 = ''
+    png_icon = (f'<link rel=icon type=image/png sizes=64x64 href="data:image/png;base64,{fav64}">'
+                f'<link rel=apple-touch-icon href="data:image/png;base64,{fav64}">') if fav64 else ''
     return add_today_cpu(add_heat(add_lesson(f"""<!doctype html><html lang=en><head><meta charset=utf-8><script>try{{if(sessionStorage.getItem("mm-again"))document.documentElement.classList.add("again")}}catch(_){{}}
 (function(){{var act=Date.now(),due=Date.now()+60000;["pointerdown","pointermove","wheel","keydown","touchstart","scroll"].forEach(function(t){{addEventListener(t,function(){{act=Date.now()}},{{passive:true,capture:true}})}});
 setInterval(function(){{if(Date.now()<due||(!document.hidden&&Date.now()-act<45000))return;try{{sessionStorage.setItem("mm-again","1");var p=document.querySelector(".panel.on");if(p)sessionStorage.setItem("mm-scroll",JSON.stringify({{id:p.id,top:p.scrollTop}}))}}catch(_){{}}location.reload()}},5000)}})()</script>
@@ -960,7 +966,7 @@ setInterval(function(){{if(Date.now()<due||(!document.hidden&&Date.now()-act<450
 <script>addEventListener("load",function(){{if(!document.documentElement.classList.contains("again"))return;
 var f=function(){{document.getAnimations().forEach(function(a){{if(a.effect&&a.effect.getTiming().iterations!==Infinity)a.finish()}})}};f();setTimeout(f,50)}})</script>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>{"Too Small a Mac" if rec > TOTAL else "Mac Memory Check"}</title>
-<link rel=icon type=image/png sizes=64x64 href="data:image/png;base64,{fav64}"><link rel=apple-touch-icon href="data:image/png;base64,{fav64}">
+{png_icon}
 <link rel=icon href='data:image/svg+xml,{v["fav"]}'>
 <link rel=preconnect href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;600;800&family=Geist+Mono:wght@400;600&display=swap" rel=stylesheet>
 <style>
